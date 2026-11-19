@@ -4,6 +4,7 @@ import * as strava from "./_lib/strava.mjs";
 import { COROS_REGIONS, registerClient, authorizeUrl as corosAuthUrl, exchangeCode as corosExchange, refreshToken as corosRefresh, CorosMcp, fetchCorosData } from "./_lib/coros.mjs";
 import { dailyPoint, normalizeStrava, GOALS, isoDay, addDays, dedupe } from "./_lib/engine.mjs";
 import { updateGame, vestiairePoints } from "./_lib/game.mjs";
+import { parsePayload, mergePhone, phoneHealth, phoneWeights } from "./_lib/phone.mjs";
 
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
@@ -24,6 +25,7 @@ function publicUser(u) {
     onboarded: !!(u.profile && u.profile.name),
     strava: u.strava ? { connected: true, firstname: u.strava.firstname || "" } : { connected: false },
     coros: u.coros ? { connected: true, region: u.coros.region } : { connected: false },
+    phone: u.phone?.lastSync ? { connected: true, lastSync: u.phone.lastSync, source: u.phone.source || "" } : { connected: false },
     checkins: u.checkins || {},
     stravaAvailable: !!(process.env.STRAVA_CLIENT_ID && process.env.STRAVA_CLIENT_SECRET),
     aiAvailable: !!process.env.ANTHROPIC_API_KEY,
@@ -84,7 +86,13 @@ async function collect(u, today) {
     })());
   }
   await Promise.all(jobs);
-  return { activities: [...coros.activities, ...stravaActs], health: coros.health || {}, errors };
+  // Le téléphone complète ce que COROS ne donne pas (ou remplace COROS si pas de montre COROS).
+  const ph = phoneHealth(u.phone, today);
+  const health = { ...(coros.health || {}) };
+  for (const k of ["hrv", "sleep", "rhr"]) if (!health[k] && ph[k]) health[k] = ph[k];
+  for (const k of ["hrvHistory", "sleepHistory", "rhrHistory"]) if (!(health[k] && health[k].length) && ph[k] && ph[k].length) health[k] = ph[k];
+  const phoneActs = Object.values(u.phone?.workouts || {});
+  return { activities: [...coros.activities, ...stravaActs, ...phoneActs], health, errors };
 }
 
 // ---------- Note du coach IA (données COROS et saisies manuelles uniquement) ----------
@@ -118,6 +126,32 @@ N'invente aucune donnée absente. Si une donnée manque, n'en parle pas.`;
   return (j.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
 }
 
+// ---------- Connexion par Strava / COROS ----------
+async function findOrCreate(mapKey, invite) {
+  const link = await db.get(mapKey);
+  if (link) { const u = await users.get(link.userId); if (u) return u; }
+  if (process.env.INVITE_CODE && String(invite || "").trim() !== process.env.INVITE_CODE) return null;
+  const u = { id: newId(), createdAt: Date.now(), checkins: {} };
+  await users.save(u);
+  await db.set(mapKey, { userId: u.id });
+  return u;
+}
+
+async function corosStart(req, region, extra) {
+  const issuer = COROS_REGIONS[region];
+  const redirectUri = `${origin(req)}/api/coros/callback`;
+  const cfgKey = `config/coros-client-${region}`;
+  let cfg = await db.get(cfgKey);
+  if (!cfg || cfg.redirectUri !== redirectUri) {
+    cfg = { clientId: await registerClient(issuer, redirectUri), redirectUri };
+    await db.set(cfgKey, cfg);
+  }
+  const { verifier, challenge } = pkce();
+  const state = newId();
+  await db.set(`oauth/${state}`, { ...extra, region, clientId: cfg.clientId, verifier, at: Date.now() });
+  return redirect(corosAuthUrl({ issuer, clientId: cfg.clientId, redirectUri, challenge, state }));
+}
+
 // ---------- Routeur ----------
 export default async (req) => {
   const url = new URL(req.url);
@@ -142,6 +176,33 @@ export default async (req) => {
     }
     if (path === "/logout" && method === "POST") return json({ ok: true }, 200, { "Set-Cookie": clearCookie });
 
+    // Réception des données du téléphone (Apple Santé via Raccourcis, Android via HC Webhook).
+    if (path.startsWith("/ingest/") && method === "POST") {
+      const token = path.slice("/ingest/".length);
+      const link = token && (await db.get(`phone/${hash(token)}`));
+      if (!link) return json({ error: "adresse inconnue" }, 404);
+      const pu = await users.get(link.userId);
+      if (!pu) return json({ error: "compte supprimé" }, 404);
+      const tz = pu.profile?.tz || "Europe/Paris";
+      const parsed = parsePayload(body, tz);
+      pu.phone = mergePhone(pu.phone, parsed, todayIn(tz));
+      pu.phone.source = body.app_version ? "android" : pu.phone.source || "iphone";
+      await users.save(pu);
+      return json({ ok: true, jours: Object.keys(parsed.days).length, seances: parsed.workouts.length });
+    }
+
+    // Connexion à son espace avec son compte Strava ou COROS (crée l'espace si besoin).
+    if (path === "/strava/login") {
+      if (!process.env.STRAVA_CLIENT_ID) return redirect("/?erreur=strava-config");
+      const state = newId();
+      await db.set(`oauth/${state}`, { mode: "login", invite: url.searchParams.get("invite") || "", at: Date.now() });
+      return redirect(strava.authorizeUrl({ clientId: process.env.STRAVA_CLIENT_ID, redirectUri: `${origin(req)}/api/strava/callback`, state }));
+    }
+    if (path === "/coros/login") {
+      const region = COROS_REGIONS[url.searchParams.get("region")] ? url.searchParams.get("region") : "eu";
+      return corosStart(req, region, { mode: "login", invite: url.searchParams.get("invite") || "" });
+    }
+
     // Retour OAuth Strava (identifie aussi l'utilisateur sur un nouvel appareil).
     if (path === "/strava/callback") {
       const st = await db.get(`oauth/${url.searchParams.get("state")}`);
@@ -150,7 +211,11 @@ export default async (req) => {
       const t = await strava.exchangeCode({ clientId: process.env.STRAVA_CLIENT_ID, clientSecret: process.env.STRAVA_CLIENT_SECRET, code: url.searchParams.get("code") });
       const scope = url.searchParams.get("scope") || "";
       if (!scope.includes("activity:read")) return redirect("/?erreur=strava-scope");
-      const u = await users.get(st.userId);
+      let u;
+      if (st.mode === "login") {
+        u = await findOrCreate(`strava/${t.athleteId}`, st.invite);
+        if (!u) return redirect("/?erreur=invitation");
+      } else u = await users.get(st.userId);
       if (!u) return redirect("/?erreur=session");
       u.strava = { athleteId: t.athleteId, firstname: t.firstname, tokens: encrypt(t) };
       await users.save(u);
@@ -163,17 +228,23 @@ export default async (req) => {
       await db.del(`oauth/${url.searchParams.get("state")}`);
       const issuer = COROS_REGIONS[st.region];
       const t = await corosExchange(issuer, { clientId: st.clientId, code: url.searchParams.get("code"), verifier: st.verifier, redirectUri: `${origin(req)}/api/coros/callback` });
-      const u = await users.get(st.userId);
+      let u;
+      if (st.mode === "login") {
+        if (!t.sub) return redirect("/?erreur=coros-login");
+        u = await findOrCreate(`coros/${st.region}/${t.sub}`, st.invite);
+        if (!u) return redirect("/?erreur=invitation");
+      } else u = await users.get(st.userId);
       if (!u) return redirect("/?erreur=session");
-      u.coros = { region: st.region, clientId: st.clientId, tokens: encrypt(t) };
+      u.coros = { region: st.region, clientId: st.clientId, tokens: encrypt(t), sub: t.sub || null };
       await users.save(u);
+      if (t.sub) await db.set(`coros/${st.region}/${t.sub}`, { userId: u.id });
       return redirect("/?connecte=coros", { "Set-Cookie": sessionCookie(u.id) });
     }
 
     // Tout le reste exige une session.
     const uid = userIdFromRequest(req);
     const u = uid && (await users.get(uid));
-    if (!u) return json({ error: "non_connecte", inviteRequired: !!process.env.INVITE_CODE }, 401);
+    if (!u) return json({ error: "non_connecte", inviteRequired: !!process.env.INVITE_CODE, stravaAvailable: !!process.env.STRAVA_CLIENT_ID }, 401);
 
     if (path === "/me") return json(publicUser(u));
 
@@ -248,7 +319,10 @@ export default async (req) => {
       if (!u.profile) return json({ error: "profil_manquant" }, 400);
       const today = todayIn(u.profile.tz);
       const { activities, health, errors } = await collect(u, today);
-      const point = dailyPoint({ profile: u.profile, activities, health, checkins: u.checkins || {}, today });
+      // Les pesées du téléphone alimentent la courbe de poids sans valider la quête « ressenti ».
+      const withWeights = { ...(u.checkins || {}) };
+      for (const [d, w] of Object.entries(phoneWeights(u.phone))) withWeights[d] = { weight: w, ...(withWeights[d] || {}) };
+      const point = dailyPoint({ profile: u.profile, activities, health, checkins: withWeights, today });
       const g = updateGame({ game: u.game, point, acts: dedupe(activities), checkins: u.checkins || {}, health, profile: u.profile, today });
       const changed = JSON.stringify(g.state) !== JSON.stringify(u.game || null);
       u.game = g.state;
@@ -291,18 +365,25 @@ export default async (req) => {
     }
     if (path === "/coros/connect") {
       const region = COROS_REGIONS[url.searchParams.get("region")] ? url.searchParams.get("region") : "eu";
-      const issuer = COROS_REGIONS[region];
-      const redirectUri = `${origin(req)}/api/coros/callback`;
-      const cfgKey = `config/coros-client-${region}`;
-      let cfg = await db.get(cfgKey);
-      if (!cfg || cfg.redirectUri !== redirectUri) {
-        cfg = { clientId: await registerClient(issuer, redirectUri), redirectUri };
-        await db.set(cfgKey, cfg);
+      return corosStart(req, region, { userId: u.id });
+    }
+    if (path === "/phone") {
+      let token = u.phoneToken ? decrypt(u.phoneToken).t : null;
+      if (!token || url.searchParams.get("reset") === "1") {
+        if (u.phoneTokenHash) await db.del(`phone/${u.phoneTokenHash}`);
+        token = newId() + newId();
+        u.phoneToken = encrypt({ t: token });
+        u.phoneTokenHash = hash(token);
+        await db.set(`phone/${u.phoneTokenHash}`, { userId: u.id });
+        await users.save(u);
       }
-      const { verifier, challenge } = pkce();
-      const state = newId();
-      await db.set(`oauth/${state}`, { userId: u.id, region, clientId: cfg.clientId, verifier, at: Date.now() });
-      return redirect(corosAuthUrl({ issuer, clientId: cfg.clientId, redirectUri, challenge, state }));
+      return json({ url: `${origin(req)}/api/ingest/${token}`, lastSync: u.phone?.lastSync || null, days: Object.keys(u.phone?.days || {}).length, workouts: Object.keys(u.phone?.workouts || {}).length });
+    }
+    if (path === "/phone/disconnect" && method === "POST") {
+      if (u.phoneTokenHash) await db.del(`phone/${u.phoneTokenHash}`);
+      delete u.phone; delete u.phoneToken; delete u.phoneTokenHash;
+      await users.save(u);
+      return json(publicUser(u));
     }
     if (path === "/strava/disconnect" && method === "POST") {
       if (u.strava) {
@@ -314,6 +395,7 @@ export default async (req) => {
       return json(publicUser(u));
     }
     if (path === "/coros/disconnect" && method === "POST") {
+      if (u.coros?.sub) await db.del(`coros/${u.coros.region}/${u.coros.sub}`);
       delete u.coros;
       await users.save(u);
       return json(publicUser(u));
@@ -334,6 +416,8 @@ export default async (req) => {
     if (path === "/account" && method === "DELETE") {
       if (u.strava) { try { await strava.deauthorize(await stravaToken(u)); } catch { /* */ } await db.del(`strava/${u.strava.athleteId}`); }
       if (u.recoveryHash) await db.del(`codes/${u.recoveryHash}`);
+      if (u.phoneTokenHash) await db.del(`phone/${u.phoneTokenHash}`);
+      if (u.coros?.sub) await db.del(`coros/${u.coros.region}/${u.coros.sub}`);
       const idx = (await db.get("vestiaire/index")) || { ids: [] };
       if (idx.ids.includes(u.id)) await db.set("vestiaire/index", { ids: idx.ids.filter((i) => i !== u.id) });
       await users.remove(u.id);

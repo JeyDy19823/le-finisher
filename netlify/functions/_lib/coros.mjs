@@ -45,6 +45,11 @@ export function authorizeUrl({ issuer, clientId, redirectUri, challenge, state }
   return `${issuer}/oauth2/authorize?${q}`;
 }
 
+// Identifiant stable du compte COROS (champ « sub » du jeton OpenID), pour se reconnecter.
+function jwtSub(t) {
+  try { return JSON.parse(Buffer.from(String(t).split(".")[1], "base64url").toString("utf8")).sub || null; } catch { return null; }
+}
+
 async function tokenRequest(issuer, form) {
   const r = await fetch(`${issuer}/oauth2/token`, {
     method: "POST",
@@ -57,6 +62,7 @@ async function tokenRequest(issuer, form) {
     access: j.access_token,
     refresh: j.refresh_token,
     expiresAt: Date.now() + (Number(j.expires_in) || 3600) * 1000,
+    sub: jwtSub(j.id_token) || jwtSub(j.access_token),
   };
 }
 
@@ -150,7 +156,7 @@ export function parseSportRecords(text) {
       distanceKm: dist ? Number(dist) : 0,
       avgHr: hr ? Number(hr) : null,
       elevation: 0,
-      hour: start ? Number(new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).format(new Date(Number(start) * 1000))) : null,
+      hour: start ? parseInt(new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).format(new Date(Number(start) * 1000)), 10) : null,
     });
   }
   return out;

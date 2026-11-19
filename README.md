@@ -28,6 +28,15 @@ L'inscription se fait en 4 écrans courts (prénom et sports, objectif, réglage
 - Séries : jours de ressenti d'affilée, journées parfaites, semaines régulières.
 - Le vestiaire : classement de la semaine entre potes, sur inscription volontaire. Pour respecter Strava, il ne compte que du déclaratif (ressenti rempli 10 pts, séance déclarée 20 pts) et n'affiche que le prénom.
 
+## Connexions par utilisateur
+
+Chacun branche ses propres comptes, et peut se connecter à son espace avec son compte Strava ou COROS (le code d'invitation n'est demandé qu'à la création).
+
+- Strava : OAuth, une app Strava pour tout le site (10 athlètes max sans revue Strava, abonnement Strava requis pour ce palier).
+- COROS : serveur MCP officiel en libre-service, rien à configurer.
+- Apple Santé (iPhone) et Health Connect (Android) : aucune API web n'existe, c'est le téléphone qui envoie ses données vers une adresse personnelle et secrète (`/api/ingest/<jeton>`). iPhone : raccourci gratuit de l'app Raccourcis (format simple `{date, hrv, restingHr, weight, sleepMinutes, steps}`). Android : appli open source HC Webhook (https://github.com/mcnaveen/health-connect-webhook), format JSON documenté dans son dépôt. Les instructions pas à pas sont dans l'appli, Réglages > Apple Santé / Android.
+- Garmin : Garmin a suspendu l'accès de nouvelles applis à son programme développeur, et la clé personnelle Garmin ne couvre que son propre compte. En attendant, les utilisateurs Garmin passent par la synchro Garmin vers Strava (séances) et vers Apple Santé ou Health Connect (sommeil, FC de repos, poids).
+
 ## Mise en ligne sur Netlify
 
 Le glisser-déposer Netlify ne déploie pas les fonctions serveur : il faut passer par GitHub ou par la ligne de commande.

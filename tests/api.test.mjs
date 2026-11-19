@@ -22,7 +22,7 @@ globalThis.fetch = async (url, opts = {}) => {
     return ok(acts);
   }
   if (url.endsWith("/connect/register")) return ok({ client_id: "cc1" });
-  if (url.endsWith("/oauth2/token")) return ok({ access_token: "ca", refresh_token: "cr", expires_in: 3600 });
+  if (url.endsWith("/oauth2/token")) return ok({ access_token: "ca", refresh_token: "cr", expires_in: 3600, id_token: "e30." + Buffer.from(JSON.stringify({ sub: "coros-user-7" })).toString("base64url") + ".x" });
   if (url.endsWith("/mcp")) {
     const b = JSON.parse(opts.body);
     if (b.method === "initialize") return ok({ jsonrpc: "2.0", id: b.id, result: { protocolVersion: "2025-06-18" } }, { "mcp-session-id": "s1" });
@@ -81,6 +81,25 @@ await call("/quest", { method: "POST", body: { action: "declare" } });
 await call("/profile", { method: "POST", body: { profile: { ...prof.j.profile, vestiaire: true } } });
 const v1 = await call("/vestiaire"); assert.equal(v1.j.enabled, true); assert.equal(v1.j.members.length, 1); assert.equal(v1.j.members[0].points, 30);
 assert.ok(!JSON.stringify(v1.j).match(/km|bpm|Footing|load|ctl/i), "données d'activité exposées au vestiaire");
+// Téléphone : adresse personnelle + réception
+const ph = await call("/phone"); assert.match(ph.j.url, /\/api\/ingest\/[\w-]{20,}$/);
+const ing = await handler(new Request(ph.j.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ date: today, hrv: "61 ms", restingHr: 50, weight: 87.9, sleepMinutes: 470 }) }));
+assert.equal(ing.status, 200);
+assert.equal((await handler(new Request("https://forme.example/api/ingest/fauxjeton", { method: "POST", body: "{}" }))).status, 404);
+const me2 = await call("/me"); assert.equal(me2.j.phone.connected, true);
+// Connexion avec COROS depuis un autre appareil : on retrouve le même espace
+const savedCk = cookie; cookie = "";
+const lc = await call("/coros/login?region=eu&invite=");
+const lcs = new URL(lc.loc).searchParams.get("state");
+const lcb = await call(`/coros/callback?state=${lcs}&code=zz`); assert.equal(lcb.loc, "/?connecte=coros");
+assert.equal(cookie, savedCk, "la connexion COROS n'a pas retrouvé l'espace");
+// Connexion Strava d'un inconnu sans code d'invitation : refusée
+cookie = "";
+const ls = await call("/strava/login?invite=");
+mem.delete("strava/42");
+const lsb = await call(`/strava/callback?state=${new URL(ls.loc).searchParams.get("state")}&code=a&scope=read,activity:read_all`);
+assert.equal(lsb.loc, "/?erreur=invitation");
+cookie = savedCk;
 // Reconnexion par code
 const saved = cookie; cookie = "";
 assert.equal((await call("/login", { method: "POST", body: { code: s.j.recoveryCode.toLowerCase() } })).status, 200);

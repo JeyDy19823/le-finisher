@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "PWA multi-utilisateurs : point de forme quotidien à partir de Strava et COROS",
-  "scripts": { "test": "node tests/parse.test.mjs && node tests/game.test.mjs && node tests/api.test.mjs" },
+  "scripts": { "test": "node tests/parse.test.mjs && node tests/game.test.mjs && node tests/phone.test.mjs && node tests/api.test.mjs" },
   "dependencies": { "@netlify/blobs": "^8.1.0" },
   "engines": { "node": ">=18" }
 }

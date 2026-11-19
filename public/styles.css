@@ -215,3 +215,16 @@ span.chip { border: 1px solid var(--line); background: var(--surface-2); font-si
 body.landing .sticky-cta { display: flex; transform: translateY(110%); transition: transform .25s; }
 body.landing.scrolled .sticky-cta { transform: none; }
 .pop { right: 70px; bottom: 30px; }
+
+.oauth { display: grid; gap: 8px; margin-top: 8px; }
+.oauth .conn-big { margin: 0; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 14px 0 6px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.small-code { font-size: 12px; letter-spacing: 0; word-break: break-all; text-align: left; }
+.seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+.seg button { flex: 1; border: 0; background: none; }
+.seg button.on { background: var(--accent); color: #fff; }
+.howto { padding-left: 20px; margin: 0; }
+.howto li { margin-bottom: 10px; color: var(--text-2); }
+.howto b { color: var(--text); }
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 13px; }

@@ -40,12 +40,12 @@ async function api(path, opts = {}) {
 async function boot() {
   const params = new URLSearchParams(location.search);
   if (params.get("connecte")) toast(params.get("connecte") === "strava" ? "Strava connecté" : "COROS connecté");
-  if (params.get("erreur")) toast({ strava: "Connexion Strava annulée", coros: "Connexion COROS annulée", "strava-scope": "Il faut autoriser l'accès aux activités Strava", "strava-config": "Strava n'est pas encore configuré sur ce site", session: "Session expirée, reconnecte-toi" }[params.get("erreur")] || "Erreur de connexion");
+  if (params.get("erreur")) toast({ strava: "Connexion Strava annulée", coros: "Connexion COROS annulée", "strava-scope": "Il faut autoriser l'accès aux activités Strava", "strava-config": "Strava n'est pas encore configuré sur ce site", session: "Session expirée, reconnecte-toi", invitation: "Code d'invitation manquant ou incorrect pour créer ton espace", "coros-login": "COROS n'a pas donné d'identifiant de compte : crée ton espace sans compte puis connecte COROS dans les réglages" }[params.get("erreur")] || "Erreur de connexion");
   if (params.toString()) history.replaceState(null, "", "/");
   try {
     me = await api("/me");
   } catch (e) {
-    if (e.status === 401) return renderAuth(e.data?.inviteRequired);
+    if (e.status === 401) return renderAuth(e.data?.inviteRequired, e.data?.stravaAvailable);
     app.innerHTML = `<p class="card">Impossible de joindre le serveur : ${esc(e.message)}</p>`;
     return;
   }
@@ -79,7 +79,7 @@ async function loadPoint(force) {
 // et un mot clair sur la confidentialité.
 let demo = null;
 
-function renderAuth(inviteRequired) {
+function renderAuth(inviteRequired, stravaAvailable) {
   $("#tabs").hidden = true; $("#refresh").hidden = true;
   document.body.classList.add("landing");
   app.innerHTML = `
@@ -123,7 +123,13 @@ function renderAuth(inviteRequired) {
   <section class="card" id="join">
     <h2>Rejoindre l'équipe</h2>
     ${inviteRequired ? `<label for="invite">Code d'invitation</label><input id="invite" autocomplete="off" placeholder="Celui que ton pote t'a envoyé">` : `<p class="sub">Ça prend deux minutes.</p>`}
-    <p><button class="primary big" id="signup" style="width:100%">Créer mon espace</button></p>
+    <div class="oauth">
+      ${stravaAvailable ? `<button class="btn big conn-big strava" id="withStrava"><span>🟧</span><div><b>Continuer avec Strava</b><small>Ton compte Strava devient ta clé d'accès</small></div></button>` : ""}
+      <button class="btn big conn-big" id="withCoros"><span>⌚</span><div><b>Continuer avec COROS</b><small>Ton compte COROS devient ta clé d'accès</small></div></button>
+    </div>
+    <div class="or"><span>ou</span></div>
+    <p><button class="primary big" id="signup" style="width:100%">Créer mon espace sans compte</button></p>
+    <p class="muted small">Déjà inscrit avec Strava ou COROS ? Clique sur le même bouton, tu retrouves ton espace (pas besoin du code d'invitation).</p>
     <details><summary class="muted">J'ai déjà un espace sur un autre appareil</summary>
       <input id="code" placeholder="XXXX-XXXX-XXXX" autocomplete="off" style="margin-top:8px"><p><button id="login">Me reconnecter</button></p></details>
   </section>
@@ -137,6 +143,9 @@ function renderAuth(inviteRequired) {
     if (n >= 86) { clearInterval(tick); setTimeout(() => { const q = $("#mq"); if (q) { q.classList.add("on"); q.textContent = "✓"; $("#pop")?.classList.add("show"); } }, 500); }
   }, 30);
   $("#tryDemo").onclick = $("#tryDemo2").onclick = startDemo;
+  const inv = () => encodeURIComponent($("#invite")?.value.trim() || "");
+  $("#withStrava")?.addEventListener("click", () => (location.href = `/api/strava/login?invite=${inv()}`));
+  $("#withCoros").onclick = () => (location.href = `/api/coros/login?region=eu&invite=${inv()}`);
   // La barre d'action du bas n'apparaît qu'une fois les boutons du haut sortis de l'écran.
   new IntersectionObserver(([e]) => document.body.classList.toggle("scrolled", !e.isIntersecting)).observe($(".cta-row"));
   $("#signup").onclick = async () => {
@@ -175,7 +184,7 @@ const SPORT_ICONS = { swim: "🏊", bike: "🚴", run: "🏃", hybrid: "🏋️"
 const GOAL_ICONS = { ironman: "🔱", triathlon: "🏅", marathon: "🏃", trail: "⛰️", hyrox: "🏋️", weight: "⚖️", fitness: "💚" };
 let wiz = null;
 function renderWizard(step = 1) {
-  wiz = wiz || { name: "", sports: [], goal: { type: "" }, vestiaire: true };
+  wiz = wiz || { name: me.strava?.firstname || "", sports: [], goal: { type: "" }, vestiaire: true };
   $("#tabs").hidden = true;
   const dots = [1, 2, 3, 4].map((i) => `<i class="${i <= step ? "on" : ""}"></i>`).join("");
   const nav = (next = "Suivant", skip = false) => `<div class="split wiz-nav">${step > 1 ? `<button id="back">Retour</button>` : ""}${skip ? `<button id="skip">Passer</button>` : ""}<button class="primary" id="nextStep">${next}</button></div>`;
@@ -235,7 +244,10 @@ function renderWizard(step = 1) {
       <p class="sub">Plus l'appli a de données, plus ton point du matin est juste. Tu peux brancher les deux.</p>
       <a class="btn big conn-big" href="/api/coros/connect?region=eu"><span>⌚</span><div><b>Connecter COROS</b><small>Activités, VFC, sommeil, récupération</small></div></a>
       ${me.stravaAvailable ? `<a class="btn big conn-big strava" href="/api/strava/connect"><span>🟧</span><div><b>Se connecter avec Strava</b><small>Toutes tes activités, quelle que soit ta montre</small></div></a>` : ""}
+      <button class="btn big conn-big" id="wizPhone"><span>📱</span><div><b>Apple Santé ou Android</b><small>Sommeil, VFC, FC de repos, poids, séances (Garmin, Apple Watch, Samsung…)</small></div></button>
+      <p class="muted small">Montre Garmin ? Active la synchro Garmin vers Strava pour tes séances, et vers Apple Santé ou Health Connect pour le sommeil et le poids.</p>
       <button id="later" style="width:100%;margin-top:6px">Plus tard, voir mon point du jour</button></div>`;
+    $("#wizPhone").onclick = () => { showTabs(); renderPhone(); };
     $("#later").onclick = () => { showTabs(); go("today"); };
   }
 }
@@ -564,8 +576,56 @@ async function renderGoal() {
   $("#edit").onclick = () => renderProfile(false);
 }
 
+// ---------- Apple Santé / Android ----------
+async function renderPhone(tab) {
+  view = "settings";
+  app.innerHTML = `<p class="loading">…</p>`;
+  let info;
+  try { info = await api("/phone"); } catch (e) { app.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  const isAndroid = tab ? tab === "android" : /android/i.test(navigator.userAgent);
+  app.innerHTML = `
+  <h1>Apple Santé et Android</h1>
+  <p class="sub">Ni Apple ni Google ne laissent un site lire tes données santé directement. C'est donc ton téléphone qui les envoie, une fois par jour, vers ton adresse personnelle ci-dessous. Garmin, Apple Watch, Samsung, Withings, Polar… tout ce qui remonte dans Santé ou Health Connect en profite.</p>
+  <div class="card"><h2>Ton adresse personnelle</h2>
+    <p class="muted">Elle est secrète : ne la partage pas, c'est elle qui identifie ton compte.</p>
+    <div class="code small-code" id="phoneUrl">${esc(info.url)}</div>
+    <div class="split"><button id="copyUrl" class="primary">Copier l'adresse</button><button id="resetUrl">Changer d'adresse</button></div>
+    <p class="muted">${info.lastSync ? `Dernière réception : ${new Date(info.lastSync).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })} · ${info.days} jours, ${info.workouts} séances` : "Rien reçu pour l'instant."}</p></div>
+  <div class="seg"><button id="tabIos" class="${isAndroid ? "" : "on"}">iPhone</button><button id="tabAndroid" class="${isAndroid ? "on" : ""}">Android</button></div>
+  ${isAndroid ? `
+  <div class="card"><h2>Android : Health Connect</h2><ol class="howto">
+    <li>Vérifie que ta montre ou ton appli (Garmin Connect, Samsung Health, Fitbit, Google Fit…) envoie bien ses données dans <b>Health Connect</b> (dans ses réglages, cherche « Health Connect »).</li>
+    <li>Installe l'appli gratuite et open source <b>HC Webhook</b> depuis le Play Store (com.hcwebhook.app).</li>
+    <li>Dans HC Webhook, ouvre « Data types » et coche : Sommeil, Variabilité de la fréquence cardiaque, Fréquence cardiaque au repos, Poids, Pas, Exercice. Accepte les autorisations Health Connect.</li>
+    <li>Dans « Webhooks », ajoute une adresse et colle ton adresse personnelle. Format : JSON.</li>
+    <li>Règle la synchro programmée, par exemple toutes les heures ou à 7 h chaque matin.</li>
+    <li>Appuie sur « Sync now » une première fois, puis reviens ici : la date de dernière réception doit s'afficher.</li>
+  </ol></div>` : `
+  <div class="card"><h2>iPhone : un raccourci gratuit</h2>
+    <p class="muted">On utilise l'app Raccourcis d'Apple, déjà installée. Compte 5 minutes la première fois. Les noms des actions peuvent varier un peu selon ta version d'iOS.</p>
+    <ol class="howto">
+      <li>Ouvre <b>Raccourcis</b>, onglet <b>Automatisation</b>, puis <b>+</b> et <b>Heure de la journée</b>. Choisis 7 h 30, tous les jours, et « Exécuter immédiatement ».</li>
+      <li>Ajoute l'action <b>Rechercher des échantillons de santé</b> : type « Variabilité de la fréquence cardiaque », date de début « dans les 12 dernières heures ». Ajoute ensuite <b>Calculer des statistiques</b> → Moyenne.</li>
+      <li>Ajoute de la même façon <b>Fréquence cardiaque au repos</b> (dernières 24 h, limite 1, tri du plus récent), et <b>Poids</b> (dernières 24 h, limite 1).</li>
+      <li>Pour le sommeil : <b>Rechercher des échantillons de santé</b> type « Analyse du sommeil », valeur « Endormi », dernières 12 h. Puis <b>Obtenir les détails des échantillons</b> → Durée, et <b>Calculer des statistiques</b> → Somme (en minutes).</li>
+      <li>Termine par <b>Obtenir le contenu de l'URL</b> : colle ton adresse, méthode <b>POST</b>, corps de requête <b>JSON</b> avec ces champs : <code>hrv</code>, <code>restingHr</code>, <code>weight</code>, <code>sleepMinutes</code> (chacun relié au résultat correspondant).</li>
+      <li>Lance le raccourci une fois à la main et reviens ici : la date de dernière réception doit s'afficher.</li>
+    </ol>
+    <p class="muted">Tu préfères une appli toute faite ? « Health Webhook » sur l'App Store (payante, du même auteur que l'appli Android) devrait marcher avec la même adresse, mais je ne l'ai pas encore testée.</p></div>`}
+  <div class="card"><h2>Ce qui est utilisé</h2><p class="muted">VFC de la nuit, sommeil, FC de repos et poids alimentent ta note du matin et tes courbes. Les séances du téléphone s'ajoutent à ta charge, sans doublon avec Strava ou COROS. Si tu as aussi COROS, ce sont les chiffres COROS qui passent en premier.</p>
+    ${info.lastSync ? `<button class="danger" id="phoneOff">Arrêter et effacer les données du téléphone</button>` : ""}</div>
+  <button id="backSettings" style="width:100%">Retour aux réglages</button>`;
+  $("#copyUrl").onclick = () => navigator.clipboard?.writeText(info.url).then(() => toast("Adresse copiée"));
+  $("#resetUrl").onclick = async () => { if (!confirm("L'ancienne adresse ne marchera plus. Continuer ?")) return; await api("/phone?reset=1"); renderPhone(tab); };
+  $("#tabIos").onclick = () => renderPhone("ios");
+  $("#tabAndroid").onclick = () => renderPhone("android");
+  $("#phoneOff")?.addEventListener("click", async () => { me = await api("/phone/disconnect", { method: "POST" }); data = null; renderSettings(); });
+  $("#backSettings").onclick = () => go("settings");
+}
+
 // ---------- Réglages ----------
-function renderSettings() {
+async function renderSettings() {
+  if (!demo) { try { me = await api("/me"); } catch { /* on garde l'état connu */ } }
   app.innerHTML = `
   <h1>Réglages</h1>
   <div class="card"><h2>Mes applis</h2>
@@ -573,6 +633,9 @@ function renderSettings() {
       ${me.strava.connected ? `<button id="stravaOff">Déconnecter</button>` : me.stravaAvailable ? `<a class="btn strava" href="/api/strava/connect">Se connecter avec Strava</a>` : `<span class="muted">Non configuré</span>`}</div>
     <div class="conn"><div><b>COROS</b><br><span class="muted">${me.coros.connected ? `<span class="ok">Connecté</span> · région ${esc(me.coros.region.toUpperCase())}` : "Activités, VFC, sommeil, récupération"}</span></div>
       ${me.coros.connected ? `<button id="corosOff">Déconnecter</button>` : `<div class="row"><select id="region" style="width:auto"><option value="eu">Europe</option><option value="us">États-Unis</option><option value="cn">Chine</option></select><button class="primary" id="corosOn">Connecter</button></div>`}</div>
+    <div class="conn"><div><b>Apple Santé / Android</b><br><span class="muted">${me.phone.connected ? `<span class="ok">Reçu</span> · dernière synchro ${new Date(me.phone.lastSync).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}` : "Sommeil, VFC, FC repos, poids, séances du téléphone"}</span></div>
+      <button id="phoneCfg">${me.phone.connected ? "Gérer" : "Configurer"}</button></div>
+    <div class="conn"><div><b>Garmin</b><br><span class="muted">Garmin a mis en pause l'accès des applis tierces. En attendant : synchro Garmin → Strava pour les séances, et Garmin → Apple Santé ou Health Connect pour le reste.</span></div><span class="muted">Via Strava / téléphone</span></div>
     <p class="muted">Chacun connecte ses propres comptes. Tes données ne sont visibles que par toi. Si ta montre COROS est déjà synchronisée avec Strava, les doublons sont fusionnés automatiquement.</p>
   </div>
   <div class="card"><h2>Profil et objectif</h2><p class="sub">${esc(me.profile.name)} · ${esc(GOALS[me.profile.goal?.type] || "")} · ${me.profile.sports.map((s) => SPORTS[s]).join(", ")}</p><button id="editProfile">Modifier</button></div>
@@ -582,6 +645,7 @@ function renderSettings() {
     <p class="muted">Les activités Strava ne sont jamais stockées : elles sont lues à chaque ouverture. On garde seulement ton profil, tes saisies et des jetons de connexion chiffrés.</p></div>
   <div class="card flat"><p class="muted">Installer l'appli : sur iPhone, bouton Partager puis « Sur l'écran d'accueil ». Sur Android, menu ⋮ puis « Installer l'application ».</p></div>`;
   $("#editProfile").onclick = () => renderProfile(false);
+  $("#phoneCfg").onclick = () => renderPhone();
   if (demo) for (const a of app.querySelectorAll("a.btn")) a.onclick = (e) => { e.preventDefault(); toast("En démo, rien à connecter : crée ton espace pour de vrai !"); };
   $("#corosOn")?.addEventListener("click", () => (location.href = `/api/coros/connect?region=${$("#region").value}`));
   $("#stravaOff")?.addEventListener("click", async () => { me = await api("/strava/disconnect", { method: "POST" }); data = null; renderSettings(); });
