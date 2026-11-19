@@ -54,7 +54,7 @@ export function pkce() {
 }
 
 // globalThis.__FDJ_STORE permet aux tests d'utiliser un stockage en mémoire.
-const store = () => globalThis.__FDJ_STORE || getStore({ name: "forme-du-jour", consistency: "strong" });
+const store = () => globalThis.__FDJ_STORE || getStore({ name: "le-finisher", consistency: "strong" });
 export const db = {
   get: (k) => store().get(k, { type: "json" }),
   set: (k, v) => store().setJSON(k, v),

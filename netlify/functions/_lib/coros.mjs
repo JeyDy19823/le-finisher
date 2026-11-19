@@ -18,7 +18,7 @@ export async function registerClient(issuer, redirectUri) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_name: "Forme du jour",
+      client_name: "Le Finisher",
       redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -101,7 +101,7 @@ export class CorosMcp {
     return payload.result;
   }
   async init() {
-    if (!this.ready) this.ready = this.rpc("initialize", { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "Forme du jour", version: "1.0.0" } });
+    if (!this.ready) this.ready = this.rpc("initialize", { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "Le Finisher", version: "1.0.0" } });
     return this.ready;
   }
   async call(name, args = {}) {

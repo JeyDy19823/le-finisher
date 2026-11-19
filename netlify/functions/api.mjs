@@ -291,7 +291,7 @@ export default async (req) => {
     }
     if (path === "/export") {
       return new Response(JSON.stringify({ profile: u.profile, checkins: u.checkins }, null, 2), {
-        headers: { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="forme-du-jour-export.json"' },
+        headers: { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="le-finisher-export.json"' },
       });
     }
     if (path === "/account" && method === "DELETE") {

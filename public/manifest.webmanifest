@@ -1,6 +1,6 @@
 {
-  "name": "Forme du jour",
-  "short_name": "Forme",
+  "name": "Le Finisher",
+  "short_name": "Finisher",
   "description": "Ton point de forme quotidien à partir de Strava et COROS",
   "start_url": "/",
   "display": "standalone",

@@ -1,4 +1,6 @@
-# Forme du jour
+# Le Finisher
+
+Le point du matin de ceux qui vont au bout.
 
 PWA multi-utilisateurs : chaque sportif crée son espace, choisit son objectif, connecte ses propres comptes Strava et/ou COROS, et reçoit chaque matin son point de forme avec deux propositions de séances, plus des tableaux de bord.
 
@@ -44,7 +46,7 @@ Redéployer après avoir ajouté les variables.
 ## Créer l'app Strava
 
 1. Aller sur https://www.strava.com/settings/api et créer une application.
-2. Authorization Callback Domain : le domaine du site, sans https ni chemin (ex. `forme-du-jour.netlify.app`).
+2. Authorization Callback Domain : le domaine du site, sans https ni chemin (ex. `le-finisher.netlify.app`).
 3. Copier Client ID et Client Secret dans les variables Netlify.
 4. Places : une app neuve n'accepte qu'un seul athlète (toi). Depuis le tableau de bord API on peut passer à 10 athlètes sans revue, mais depuis juin 2026 il faut un abonnement Strava pour ce palier. Au-delà de 10, il faut une revue Strava, qui prend souvent plusieurs semaines voire des mois.
 5. Charte Strava : remplacer le bouton orange « Se connecter avec Strava » et la mention « Powered by Strava » par les visuels officiels du kit de marque Strava (https://developers.strava.com/guidelines/) avant d'ouvrir à d'autres personnes.
