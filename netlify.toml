@@ -1,4 +1,5 @@
 [build]
+  command = "node scripts/make-demo.mjs"
   publish = "public"
   functions = "netlify/functions"
 

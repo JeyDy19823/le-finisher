@@ -14,6 +14,20 @@ PWA multi-utilisateurs : chaque sportif crée son espace, choisit son objectif, 
 - Coach IA (facultatif) : un texte rédigé chaque matin à partir des données COROS et des saisies uniquement.
 - Code de récupération pour retrouver son espace sur un autre appareil, export des données, suppression du compte.
 
+## Accueil et démo
+
+La page d'accueil suit ce qui marche sur les projets fitness open source de GitHub (Endurain, Lyftr, wingfit, openGym) : une promesse en une phrase, l'aperçu animé du vrai écran, une démo jouable sans compte, trois étapes pour comprendre, et un mot clair sur la confidentialité. La démo utilise un athlète fictif dont les données passent dans le vrai moteur : `public/demo.json` est régénéré à chaque déploiement par `node scripts/make-demo.mjs`.
+
+L'inscription se fait en 4 écrans courts (prénom et sports, objectif, réglages facultatifs, connexion de la montre) au lieu d'un long formulaire.
+
+## Gamification
+
+- Quêtes du jour : remplir son ressenti (+20 XP), faire une des séances proposées ou respecter le feu rouge (+40), une quête bonus qui tourne (pesée, sommeil de 7 h, note) (+15), et +15 pour une journée parfaite.
+- Défi de la semaine : 80 % de ses heures dispo (+100 XP).
+- 8 niveaux, de « Licence en poche » à « Légende », et 20 badges (Triathlète, Centurion, Lève-tôt, Le sage, Premier kilo…), +50 XP chacun.
+- Séries : jours de ressenti d'affilée, journées parfaites, semaines régulières.
+- Le vestiaire : classement de la semaine entre potes, sur inscription volontaire. Pour respecter Strava, il ne compte que du déclaratif (ressenti rempli 10 pts, séance déclarée 20 pts) et n'affiche que le prénom.
+
 ## Mise en ligne sur Netlify
 
 Le glisser-déposer Netlify ne déploie pas les fonctions serveur : il faut passer par GitHub ou par la ligne de commande.

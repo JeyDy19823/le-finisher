@@ -2,7 +2,8 @@
 import { users, db, sessionCookie, clearCookie, userIdFromRequest, newId, hash, newRecoveryCode, pkce, encrypt, decrypt } from "./_lib/store.mjs";
 import * as strava from "./_lib/strava.mjs";
 import { COROS_REGIONS, registerClient, authorizeUrl as corosAuthUrl, exchangeCode as corosExchange, refreshToken as corosRefresh, CorosMcp, fetchCorosData } from "./_lib/coros.mjs";
-import { dailyPoint, normalizeStrava, GOALS, isoDay, addDays } from "./_lib/engine.mjs";
+import { dailyPoint, normalizeStrava, GOALS, isoDay, addDays, dedupe } from "./_lib/engine.mjs";
+import { updateGame, vestiairePoints } from "./_lib/game.mjs";
 
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
@@ -187,6 +188,7 @@ export default async (req) => {
         hoursPerWeek: Number(p.hoursPerWeek) || null,
         tz: p.tz || "Europe/Paris",
         aiEnabled: !!p.aiEnabled,
+        vestiaire: !!p.vestiaire,
         goal: {
           type: GOALS[p.goal?.type] ? p.goal.type : "fitness",
           name: String(p.goal?.name || "").slice(0, 60),
@@ -196,7 +198,38 @@ export default async (req) => {
         },
       };
       await users.save(u);
+      const idx = (await db.get("vestiaire/index")) || { ids: [] };
+      const has = idx.ids.includes(u.id);
+      if (u.profile.vestiaire && !has) await db.set("vestiaire/index", { ids: [...idx.ids, u.id] });
+      if (!u.profile.vestiaire && has) await db.set("vestiaire/index", { ids: idx.ids.filter((i) => i !== u.id) });
       return json(publicUser(u));
+    }
+
+    if (path === "/quest" && method === "POST") {
+      const today = todayIn(u.profile?.tz);
+      const game = u.game || { days: {}, badges: {}, weeks: {} };
+      const day = { ...(game.days?.[today] || {}) };
+      day.manual = { ...(day.manual || {}) };
+      if (body.action === "session") { day.manual.session = true; day.manual.declared = true; }
+      else if (body.action === "declare") day.manual.declared = true;
+      else return json({ error: "action inconnue" }, 400);
+      u.game = { ...game, days: { ...(game.days || {}), [today]: day } };
+      await users.save(u);
+      return json({ ok: true });
+    }
+
+    if (path === "/vestiaire") {
+      if (!u.profile?.vestiaire) return json({ enabled: false, members: [] });
+      const today = todayIn(u.profile.tz);
+      const idx = (await db.get("vestiaire/index")) || { ids: [] };
+      const members = [];
+      for (const id of idx.ids.slice(0, 50)) {
+        const m = id === u.id ? u : await users.get(id);
+        if (!m || !m.profile?.vestiaire) continue;
+        members.push({ name: m.profile.name, me: m.id === u.id, ...vestiairePoints(m, today) });
+      }
+      members.sort((a, b) => b.points - a.points || b.streak - a.streak);
+      return json({ enabled: true, members });
     }
 
     if (path === "/checkin" && method === "POST") {
@@ -216,9 +249,13 @@ export default async (req) => {
       const today = todayIn(u.profile.tz);
       const { activities, health, errors } = await collect(u, today);
       const point = dailyPoint({ profile: u.profile, activities, health, checkins: u.checkins || {}, today });
-      if (u._dirty) { delete u._dirty; await users.save(u); }
+      const g = updateGame({ game: u.game, point, acts: dedupe(activities), checkins: u.checkins || {}, health, profile: u.profile, today });
+      const changed = JSON.stringify(g.state) !== JSON.stringify(u.game || null);
+      u.game = g.state;
+      if (u._dirty || changed) { delete u._dirty; await users.save(u); }
       return json({
         point,
+        game: g.view,
         health: { hrv: health.hrv, hrvHistory: health.hrvHistory || [], sleep: health.sleep, sleepHistory: health.sleepHistory || [], recovery: health.recovery, rhr: health.rhr, rhrHistory: health.rhrHistory || [], corosLoad: health.corosLoad || [] },
         errors,
         sources: { strava: !!u.strava, coros: !!u.coros },
@@ -297,6 +334,8 @@ export default async (req) => {
     if (path === "/account" && method === "DELETE") {
       if (u.strava) { try { await strava.deauthorize(await stravaToken(u)); } catch { /* */ } await db.del(`strava/${u.strava.athleteId}`); }
       if (u.recoveryHash) await db.del(`codes/${u.recoveryHash}`);
+      const idx = (await db.get("vestiaire/index")) || { ids: [] };
+      if (idx.ids.includes(u.id)) await db.set("vestiaire/index", { ids: idx.ids.filter((i) => i !== u.id) });
       await users.remove(u.id);
       return json({ ok: true }, 200, { "Set-Cookie": clearCookie });
     }

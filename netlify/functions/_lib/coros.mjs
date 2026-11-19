@@ -150,6 +150,7 @@ export function parseSportRecords(text) {
       distanceKm: dist ? Number(dist) : 0,
       avgHr: hr ? Number(hr) : null,
       elevation: 0,
+      hour: start ? Number(new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).format(new Date(Number(start) * 1000))) : null,
     });
   }
   return out;

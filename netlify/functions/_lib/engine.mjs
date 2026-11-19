@@ -87,6 +87,7 @@ export function normalizeStrava(s) {
     distanceKm: s.distance ? Math.round(s.distance / 10) / 100 : 0,
     avgHr: s.has_heartrate && s.average_heartrate ? Math.round(s.average_heartrate) : null,
     elevation: s.total_elevation_gain || 0,
+    hour: Number(String(s.start_date_local || "").slice(11, 13)) || null,
   };
 }
 

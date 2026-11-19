@@ -73,6 +73,14 @@ console.log("Point :", P.readiness.score, P.readiness.label, "| CTL", P.load.ctl
 const co = await call("/coach", { method: "POST", body: {} }); assert.equal(co.j.text, "Point du coach.");
 assert.ok(!/strava|Footing/i.test(aiPrompt), "des données Strava ont fuité vers l'IA");
 assert.ok(aiPrompt.includes("Below normal"));
+// Gamification
+assert.ok(pt.j.game && pt.j.game.quests.length === 3, "quêtes absentes");
+assert.ok(pt.j.game.level.xp > 0);
+const pt2 = await call("/point"); assert.equal(pt2.j.game.xpGained, 0, "XP comptée deux fois");
+await call("/quest", { method: "POST", body: { action: "declare" } });
+await call("/profile", { method: "POST", body: { profile: { ...prof.j.profile, vestiaire: true } } });
+const v1 = await call("/vestiaire"); assert.equal(v1.j.enabled, true); assert.equal(v1.j.members.length, 1); assert.equal(v1.j.members[0].points, 30);
+assert.ok(!JSON.stringify(v1.j).match(/km|bpm|Footing|load|ctl/i), "données d'activité exposées au vestiaire");
 // Reconnexion par code
 const saved = cookie; cookie = "";
 assert.equal((await call("/login", { method: "POST", body: { code: s.j.recoveryCode.toLowerCase() } })).status, 200);

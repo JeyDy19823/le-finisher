@@ -25,6 +25,11 @@ function toast(msg) {
   clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = "none"), 3500);
 }
 async function api(path, opts = {}) {
+  if (demo) {
+    if (path === "/vestiaire") return demo.vestiaire;
+    if (path === "/me") return demo.me;
+    const e = new Error("En démo rien n'est enregistré : crée ton espace pour de vrai !"); e.status = 0; toast(e.message); throw e;
+  }
   const r = await fetch("/api" + path, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(j.error || `Erreur ${r.status}`); e.status = r.status; e.data = j; throw e; }
@@ -52,39 +57,94 @@ async function boot() {
 function showTabs() {
   $("#tabs").hidden = false; $("#refresh").hidden = false;
   for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => go(b.dataset.view);
-  $("#refresh").onclick = () => { data = null; go(view); };
+  $("#refresh").onclick = () => { if (!demo) data = null; go(view); };
 }
 function go(v) {
   view = v;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.view === v);
   window.scrollTo(0, 0);
-  ({ today: renderToday, dash: renderDash, goal: renderGoal, settings: renderSettings })[v]();
+  ({ today: renderToday, dash: renderDash, game: renderGame, goal: renderGoal, settings: renderSettings })[v]();
 }
 async function loadPoint(force) {
-  if (data && !force) return data;
+  if (data && (!force || demo)) return data;
   data = await api("/point");
+  celebrate(data.game);
   for (const err of data.errors || []) toast(`${err.source === "strava" ? "Strava" : "COROS"} : ${err.message}`);
   return data;
 }
 
-// ---------- Accès ----------
+// ---------- Accueil, démo et accès ----------
+// Inspiré des projets fitness open source de GitHub (Endurain, Lyftr, wingfit, openGym) :
+// une promesse en une phrase, l'aperçu du vrai écran, une démo jouable sans compte,
+// et un mot clair sur la confidentialité.
+let demo = null;
+
 function renderAuth(inviteRequired) {
-  $("#tabs").hidden = true;
+  $("#tabs").hidden = true; $("#refresh").hidden = true;
+  document.body.classList.add("landing");
   app.innerHTML = `
-  <div class="hero"><h1>Ton point de forme, chaque matin</h1>
-  <p class="sub">Branche Strava et/ou ta montre COROS, choisis ton objectif, et l'appli te dit comment tu es ce matin et quelle séance faire.</p></div>
-  <div class="card"><h2>Créer mon espace</h2>
-    ${inviteRequired ? `<label for="invite">Code d'invitation</label><input id="invite" autocomplete="off" placeholder="Donné par l'organisateur">` : ""}
-    <p><button class="primary" id="signup">Commencer</button></p></div>
-  <div class="card"><h2>J'ai déjà un espace</h2>
-    <p class="muted">Sur un nouveau téléphone ou ordinateur, entre ton code de récupération.</p>
-    <input id="code" placeholder="XXXX-XXXX-XXXX" autocomplete="off">
-    <p><button id="login">Me reconnecter</button></p></div>`;
+  <section class="hero2">
+    <span class="eyebrow">Triathlon · course · vélo · Hyrox</span>
+    <h1>Chaque matin,<br><span class="grad">ton feu vert.</span></h1>
+    <p class="lead">Le Finisher lit ta montre COROS et ton Strava, te dit comment tu es ce matin et te donne la séance qui va avec. Et pour ne rien lâcher, des défis entre potes.</p>
+    <div class="cta-row"><button class="primary big" id="tryDemo">Essayer la démo</button><a class="btn big" href="#join">Créer mon espace</a></div>
+    <p class="muted small">Sans inscription, avec des données fictives.</p>
+  </section>
+  <section class="phone" aria-hidden="true">
+    <div class="screen">
+      <div class="m-lvl"><span class="num">6</span><div><b>Finisher</b><div class="xpbar"><i style="width:42%"></i></div></div><span class="m-fire">🔥 12</span></div>
+      <div class="m-card"><div id="demoGauge"></div><div><span class="badge"><span class="ic" style="background:var(--good)">✓</span>Feu vert</span><p class="muted small">VFC dans ta zone, sommeil 84, récup 88 %</p></div></div>
+      <div class="m-sess" style="border-color:var(--bike)"><small>Axe triathlon</small><b>Vélo : sweet spot</b><span>75 min</span></div>
+      <div class="m-sess" style="border-color:var(--hybrid)"><small>Axe CrossFit / Hyrox</small><b>Hyrox : simulation</b><span>60 min</span></div>
+      <div class="m-quest"><span class="check on">✓</span>Ressenti du jour<span class="xp">+20 XP</span></div>
+      <div class="m-quest"><span class="check" id="mq"></span>Séance proposée<span class="xp">+40 XP</span></div>
+      <div class="pop" id="pop">+40 XP</div>
+    </div>
+  </section>
+  <section class="steps">
+    <h2>Comment ça marche</h2>
+    <ol>
+      <li><b>Branche ta montre</b><span>COROS et/ou Strava, en deux clics. Pas de montre ? Ton ressenti suffit pour démarrer.</span></li>
+      <li><b>Choisis ton objectif</b><span>Ironman, marathon, Hyrox, perte de poids… L'appli cale les phases jusqu'au jour J.</span></li>
+      <li><b>Lis ton point chaque matin</b><span>Ta forme sur 100, deux séances adaptées, tes quêtes du jour.</span></li>
+    </ol>
+  </section>
+  <section class="feats">
+    <div><span>🚦</span><b>Feu vert, orange ou rouge</b><p>VFC, sommeil, récup, charge et ressenti en une note claire.</p></div>
+    <div><span>🏊🚴🏃</span><b>Deux séances par jour</b><p>Un axe triathlon et un axe CrossFit / Hyrox, dosés selon ta forme.</p></div>
+    <div><span>🏆</span><b>Défis et vestiaire</b><p>Quêtes, XP, 20 badges, et un classement de la semaine entre potes.</p></div>
+    <div><span>📈</span><b>Tableaux de bord</b><p>Courbe de forme, volume par sport, poids, VFC et sommeil.</p></div>
+  </section>
+  <section class="trust card">
+    <h2>🔒 Tes données restent à toi</h2>
+    <ul><li>Chacun ne voit que ses propres séances.</li><li>Rien n'est revendu, rien ne sert à entraîner une IA.</li><li>Tu exportes ou supprimes tout en un clic.</li></ul>
+    <div class="chips"><span class="chip">COROS</span><span class="chip">Strava</span><span class="chip">Saisie manuelle</span><span class="chip">Installable sur téléphone</span></div>
+  </section>
+  <section class="card" id="join">
+    <h2>Rejoindre l'équipe</h2>
+    ${inviteRequired ? `<label for="invite">Code d'invitation</label><input id="invite" autocomplete="off" placeholder="Celui que ton pote t'a envoyé">` : `<p class="sub">Ça prend deux minutes.</p>`}
+    <p><button class="primary big" id="signup" style="width:100%">Créer mon espace</button></p>
+    <details><summary class="muted">J'ai déjà un espace sur un autre appareil</summary>
+      <input id="code" placeholder="XXXX-XXXX-XXXX" autocomplete="off" style="margin-top:8px"><p><button id="login">Me reconnecter</button></p></details>
+  </section>
+  <div class="sticky-cta"><button class="primary" id="tryDemo2">Essayer la démo</button><a class="btn" href="#join">Créer mon espace</a></div>`;
+  // Petite animation de l'aperçu : la jauge monte, la quête se coche, l'XP s'affiche.
+  let n = 0;
+  const tick = setInterval(() => {
+    n = Math.min(86, n + 3);
+    if (!document.getElementById("demoGauge")) return clearInterval(tick);
+    gauge($("#demoGauge"), n, "var(--good)");
+    if (n >= 86) { clearInterval(tick); setTimeout(() => { const q = $("#mq"); if (q) { q.classList.add("on"); q.textContent = "✓"; $("#pop")?.classList.add("show"); } }, 500); }
+  }, 30);
+  $("#tryDemo").onclick = $("#tryDemo2").onclick = startDemo;
+  // La barre d'action du bas n'apparaît qu'une fois les boutons du haut sortis de l'écran.
+  new IntersectionObserver(([e]) => document.body.classList.toggle("scrolled", !e.isIntersecting)).observe($(".cta-row"));
   $("#signup").onclick = async () => {
     try {
       const r = await api("/signup", { method: "POST", body: { invite: $("#invite")?.value } });
-      app.innerHTML = `<div class="card"><h2>Garde ce code précieusement</h2>
-        <p class="sub">C'est ta clé pour retrouver ton espace sur un autre appareil. Il ne sera plus affiché (tu pourras en générer un nouveau dans les réglages).</p>
+      document.body.classList.remove("landing");
+      app.innerHTML = `<div class="card"><h2>Bienvenue dans l'équipe 👋</h2>
+        <p class="sub">Voici ta clé pour retrouver ton espace sur un autre appareil. Garde-la dans tes notes, elle ne sera plus affichée.</p>
         <div class="code">${esc(r.recoveryCode)}</div>
         <div class="split"><button id="copy">Copier</button><button class="primary" id="next">C'est noté</button></div></div>`;
       $("#copy").onclick = () => navigator.clipboard?.writeText(r.recoveryCode).then(() => toast("Code copié"));
@@ -92,12 +152,96 @@ function renderAuth(inviteRequired) {
     } catch (e) { toast(e.message); }
   };
   $("#login").onclick = async () => {
-    try { await api("/login", { method: "POST", body: { code: $("#code").value } }); boot(); } catch (e) { toast(e.message); }
+    try { await api("/login", { method: "POST", body: { code: $("#code").value } }); document.body.classList.remove("landing"); boot(); } catch (e) { toast(e.message); }
   };
 }
 
+async function startDemo() {
+  try { demo = await (await fetch("/demo.json")).json(); } catch { return toast("Démo indisponible"); }
+  me = demo.me; data = demo.point;
+  document.body.classList.remove("landing");
+  document.body.classList.add("demo");
+  const bar = document.createElement("div");
+  bar.className = "demobar";
+  bar.innerHTML = `<span>Démo avec des données fictives</span><a href="/" id="leaveDemo">Créer mon espace →</a>`;
+  document.body.prepend(bar);
+  showTabs();
+  go("today");
+}
+
 // ---------- Profil et objectif ----------
+// Inscription en 3 étapes courtes plutôt qu'un long formulaire.
+const SPORT_ICONS = { swim: "🏊", bike: "🚴", run: "🏃", hybrid: "🏋️", other: "🧗" };
+const GOAL_ICONS = { ironman: "🔱", triathlon: "🏅", marathon: "🏃", trail: "⛰️", hyrox: "🏋️", weight: "⚖️", fitness: "💚" };
+let wiz = null;
+function renderWizard(step = 1) {
+  wiz = wiz || { name: "", sports: [], goal: { type: "" }, vestiaire: true };
+  $("#tabs").hidden = true;
+  const dots = [1, 2, 3, 4].map((i) => `<i class="${i <= step ? "on" : ""}"></i>`).join("");
+  const nav = (next = "Suivant", skip = false) => `<div class="split wiz-nav">${step > 1 ? `<button id="back">Retour</button>` : ""}${skip ? `<button id="skip">Passer</button>` : ""}<button class="primary" id="nextStep">${next}</button></div>`;
+  if (step === 1) {
+    app.innerHTML = `<div class="wiz"><div class="dots">${dots}</div><h1>Salut ! Tu t'appelles comment&nbsp;?</h1>
+      <input id="name" value="${esc(wiz.name)}" maxlength="40" placeholder="Ton prénom" autofocus>
+      <h2 style="margin-top:22px">Tu pratiques quoi&nbsp;?</h2><p class="muted">Plusieurs choix possibles.</p>
+      <div class="tiles">${Object.entries(SPORTS).map(([k, v]) => `<button type="button" class="tile ${wiz.sports.includes(k) ? "on" : ""}" data-k="${k}"><span>${SPORT_ICONS[k]}</span>${v}</button>`).join("")}</div>
+      ${nav()}</div>`;
+    for (const t of document.querySelectorAll(".tile")) t.onclick = () => t.classList.toggle("on");
+    $("#nextStep").onclick = () => {
+      wiz.name = $("#name").value.trim();
+      wiz.sports = [...document.querySelectorAll(".tile.on")].map((t) => t.dataset.k);
+      if (!wiz.name) return toast("Ton prénom d'abord 🙂");
+      if (!wiz.sports.length) return toast("Choisis au moins un sport");
+      renderWizard(2);
+    };
+  } else if (step === 2) {
+    app.innerHTML = `<div class="wiz"><div class="dots">${dots}</div><h1>${esc(wiz.name)}, c'est quoi ton objectif&nbsp;?</h1>
+      <div class="tiles">${Object.entries(GOALS).map(([k, v]) => `<button type="button" class="tile ${wiz.goal.type === k ? "on" : ""}" data-k="${k}"><span>${GOAL_ICONS[k]}</span>${v}</button>`).join("")}</div>
+      <div class="grid2" style="margin-top:12px"><div><label for="goalName">Son nom (facultatif)</label><input id="goalName" value="${esc(wiz.goal.name || "")}" placeholder="Ex. Ironman de Nice"></div>
+      <div><label for="goalDate">La date</label><input id="goalDate" type="date" value="${esc(wiz.goal.date || "")}"></div></div>
+      ${nav()}</div>`;
+    for (const t of document.querySelectorAll(".tile")) t.onclick = () => { document.querySelectorAll(".tile").forEach((x) => x.classList.remove("on")); t.classList.add("on"); };
+    $("#back").onclick = () => renderWizard(1);
+    $("#nextStep").onclick = () => {
+      const t = document.querySelector(".tile.on");
+      if (!t) return toast("Choisis un objectif");
+      wiz.goal = { ...wiz.goal, type: t.dataset.k, name: $("#goalName").value, date: $("#goalDate").value };
+      renderWizard(3);
+    };
+  } else if (step === 3) {
+    app.innerHTML = `<div class="wiz"><div class="dots">${dots}</div><h1>Pour affiner</h1><p class="sub">Tout est facultatif, tu pourras compléter plus tard.</p>
+      <div class="grid2">
+        <div><label for="tw">Poids visé (kg)</label><input id="tw" type="number" step="0.1" inputmode="decimal" value="${esc(wiz.goal.targetWeight || "")}"></div>
+        <div><label for="twd">Pour quand ?</label><input id="twd" type="date" value="${esc(wiz.goal.weightDate || "")}"></div>
+        <div><label for="hours">Heures dispo par semaine</label><input id="hours" type="number" inputmode="decimal" value="${esc(wiz.hoursPerWeek || "")}" placeholder="Ex. 8"></div>
+        <div><label for="sex">Sexe</label><select id="sex"><option value="m">Homme</option><option value="f" ${wiz.sex === "f" ? "selected" : ""}>Femme</option></select></div>
+        <div><label for="hrMax">FC max</label><input id="hrMax" type="number" inputmode="numeric" value="${esc(wiz.hrMax || "")}" placeholder="Ex. 185"></div>
+        <div><label for="hrRest">FC de repos</label><input id="hrRest" type="number" inputmode="numeric" value="${esc(wiz.hrRest || "")}" placeholder="Ex. 55"></div>
+      </div>
+      <label class="row" style="margin-top:16px"><input type="checkbox" id="vest" style="width:auto" ${wiz.vestiaire ? "checked" : ""}> Rejoindre le vestiaire (classement de la semaine entre potes)</label>
+      ${me.aiAvailable ? `<label class="row"><input type="checkbox" id="ai" style="width:auto"> Activer le coach IA</label>` : ""}
+      ${nav("C'est parti", true)}</div>`;
+    const collect = () => Object.assign(wiz, { hoursPerWeek: $("#hours").value, sex: $("#sex").value, hrMax: $("#hrMax").value, hrRest: $("#hrRest").value, vestiaire: $("#vest").checked, aiEnabled: $("#ai")?.checked || false, goal: { ...wiz.goal, targetWeight: $("#tw").value, weightDate: $("#twd").value } });
+    $("#back").onclick = () => { collect(); renderWizard(2); };
+    const finish = async () => {
+      collect();
+      try {
+        me = await api("/profile", { method: "POST", body: { profile: { ...wiz, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } } });
+        renderWizard(4);
+      } catch (e) { toast(e.message); }
+    };
+    $("#nextStep").onclick = finish; $("#skip").onclick = finish;
+  } else {
+    app.innerHTML = `<div class="wiz"><div class="dots">${dots}</div><h1>Dernière étape : branche ta montre</h1>
+      <p class="sub">Plus l'appli a de données, plus ton point du matin est juste. Tu peux brancher les deux.</p>
+      <a class="btn big conn-big" href="/api/coros/connect?region=eu"><span>⌚</span><div><b>Connecter COROS</b><small>Activités, VFC, sommeil, récupération</small></div></a>
+      ${me.stravaAvailable ? `<a class="btn big conn-big strava" href="/api/strava/connect"><span>🟧</span><div><b>Se connecter avec Strava</b><small>Toutes tes activités, quelle que soit ta montre</small></div></a>` : ""}
+      <button id="later" style="width:100%;margin-top:6px">Plus tard, voir mon point du jour</button></div>`;
+    $("#later").onclick = () => { showTabs(); go("today"); };
+  }
+}
+
 function renderProfile(first) {
+  if (first) return renderWizard(1);
   const p = me.profile || { sports: [], goal: {} };
   const g = p.goal || {};
   $("#tabs").hidden = first;
@@ -125,6 +269,7 @@ function renderProfile(first) {
       <div><label for="hrMax">FC max (bpm)</label><input id="hrMax" type="number" inputmode="numeric" value="${esc(p.hrMax || "")}" placeholder="Ex. 185"></div>
       <div><label for="hrRest">FC de repos (bpm)</label><input id="hrRest" type="number" inputmode="numeric" value="${esc(p.hrRest || "")}" placeholder="Ex. 55"></div>
     </div>
+    <label class="row" style="margin-top:14px"><input type="checkbox" id="vest" style="width:auto" ${p.vestiaire ? "checked" : ""}> Rejoindre le vestiaire : classement de la semaine entre potes (seuls ton prénom, tes ressentis remplis et tes séances déclarées comptent)</label>
     ${me.aiAvailable ? `<label class="row" style="margin-top:14px"><input type="checkbox" id="ai" style="width:auto" ${p.aiEnabled ? "checked" : ""}> Activer le coach IA (il ne lit que tes données COROS et tes saisies, jamais Strava)</label>` : ""}
   </div>
   <button class="primary" id="save" style="width:100%">${first ? "Continuer" : "Enregistrer"}</button>`;
@@ -136,7 +281,7 @@ function renderProfile(first) {
     const profile = {
       name: $("#name").value.trim(), sex: $("#sex").value, sports,
       hrMax: $("#hrMax").value, hrRest: $("#hrRest").value, hoursPerWeek: $("#hours").value,
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone, aiEnabled: $("#ai")?.checked || false,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone, aiEnabled: $("#ai")?.checked || false, vestiaire: $("#vest").checked,
       goal: { type: $("#goalType").value, name: $("#goalName").value, date: $("#goalDate").value, targetWeight: $("#tw").value, weightDate: $("#twd").value },
     };
     try {
@@ -166,6 +311,7 @@ async function renderToday() {
   const noSource = !d.sources.strava && !d.sources.coros;
   app.innerHTML = `
   <h1>Salut ${esc(me.profile.name)}</h1>
+  ${levelStrip(d.game)}
   <p class="sub">${longDate(p.today)}${p.phase.daysLeft != null && p.phase.daysLeft >= 0 ? ` · J-${p.phase.daysLeft} avant ${esc(me.profile.goal.name || GOALS[me.profile.goal.type])}` : ""}</p>
   ${noSource ? `<div class="alert">Aucune appli connectée : le point se base seulement sur tes saisies. <a href="#" id="toSettings">Connecter Strava ou COROS</a></div>` : ""}
   <div class="card">
@@ -180,6 +326,7 @@ async function renderToday() {
   ${p.alreadyDone.length ? `<p class="muted">Déjà fait aujourd'hui : ${esc(p.alreadyDone.join(", "))}</p>` : ""}
   <div class="grid2">${p.proposals.map((s) => `<div class="card session" style="border-left-color:${COLORS[s.category]}">
     <div class="axis">${esc(s.axis)}</div><h3>${esc(s.title)}</h3><div class="dur">${s.duration} min</div><p>${esc(s.detail)}</p></div>`).join("")}</div>
+  ${questsCard(d.game)}
   ${me.aiAvailable && me.profile.aiEnabled ? `<div class="card coach"><h2>Le mot du coach</h2><p class="muted" id="coachText">Un point rédigé à partir de COROS et de tes saisies.</p><p><button id="coachBtn">Rédiger mon point</button></p></div>` : ""}
   <div class="card"><h2>Mon ressenti du jour</h2>
     <div class="grid2">
@@ -196,6 +343,7 @@ async function renderToday() {
   <div class="card"><h2>Ma semaine</h2>${weekLine(p.week)}</div>
   ${d.sources.strava ? `<div class="powered">Données d'activité <b>Powered by Strava</b></div>` : ""}`;
   gauge($("#gauge"), r.score, st.color);
+  bindQuests();
   $("#toSettings")?.addEventListener("click", (e) => { e.preventDefault(); go("settings"); });
   for (const sc of document.querySelectorAll(".scale")) for (const b of sc.querySelectorAll("button")) b.onclick = () => { sc.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); };
   $("#saveCi").onclick = async () => {
@@ -229,6 +377,93 @@ function weekLine(w) {
     <div class="kpi"><span>Charge</span><b>${w.current.load}</b><small>${diff(w.current.load, w.previous.load)}</small></div>
     <div class="kpi"><span>Kilomètres</span><b>${w.current.km}</b><small>${w.previous.km} km avant</small></div></div>
     <p class="muted">Sur les 7 derniers jours glissants.</p>`;
+}
+
+// ---------- Gamification ----------
+function levelStrip(g) {
+  if (!g) return "";
+  const L = g.level;
+  return `<div class="card lvl" style="padding:12px 14px"><div class="num">${L.index}</div><div class="info">
+    <div class="row" style="justify-content:space-between"><b>${esc(L.name)}</b><span class="muted">${nf(L.xp)} XP</span></div>
+    <div class="xpbar"><i style="width:${L.progress}%"></i></div>
+    <div class="muted" style="margin-top:4px">${L.next ? `Encore ${nf(L.toNext)} XP pour passer ${esc(L.next)}` : "Niveau max, respect."}${g.streaks.checkin > 1 ? ` · 🔥 ${g.streaks.checkin} jours d'affilée` : ""}</div></div></div>`;
+}
+function questsCard(g) {
+  if (!g) return "";
+  const done = g.quests.filter((q) => q.done).length;
+  return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Quêtes du jour</h2><span class="muted">${done}/3${g.perfectToday ? " · journée parfaite ⭐" : ` · +${15} XP si tout est validé`}</span></div>
+    <ul class="quests">${g.quests.map((q) => `<li class="${q.done ? "done" : ""}"><span class="check ${q.done ? "on" : ""}">${q.done ? "✓" : ""}</span>
+      <span class="t">${esc(q.title)}</span>
+      <span>${!q.done && q.manualLabel ? `<button data-quest="session">${esc(q.manualLabel)}</button>` : q.id === "session" && q.done && me.profile.vestiaire && !g.declared ? `<button data-quest="declare">Déclarer au vestiaire</button>` : `<span class="xp">+${q.xp} XP</span>`}</span></li>`).join("")}</ul>
+    <p class="muted" style="margin-bottom:0">Défi de la semaine : ${nf(g.weekly.hours, 1)} h sur ${nf(g.weekly.target, 1)} h ${g.weekly.done ? "· réussi 💪" : `· ${g.weekly.daysLeft} j restants, +${g.weekly.xp} XP à la clé`}</p></div>`;
+}
+function bindQuests() {
+  for (const b of document.querySelectorAll("[data-quest]")) b.onclick = async () => {
+    b.disabled = true;
+    try { await api("/quest", { method: "POST", body: { action: b.dataset.quest } }); data = null; go(view); }
+    catch (e) { toast(e.message); b.disabled = false; }
+  };
+}
+function celebrate(g) {
+  if (!g || (!g.xpGained && !g.newly.length && !g.levelUp)) return;
+  if (!g.newly.length && !g.levelUp) { toast(`+${g.xpGained} XP`); return; }
+  const c = $("#celebrate");
+  const b = g.newly[0];
+  c.innerHTML = `<div class="box">${g.levelUp ? `<div class="big">🏆</div><h2>Niveau ${g.level.index} : ${esc(g.level.name)}</h2>` : `<div class="big">${b.icon}</div><h2>Badge débloqué : ${esc(b.name)}</h2>`}
+    ${g.newly.length > (g.levelUp ? 0 : 1) ? `<p class="muted">${g.newly.slice(g.levelUp ? 0 : 1).map((x) => `${x.icon} ${esc(x.name)}`).join(" · ")}</p>` : ""}
+    <div class="gain">+${g.xpGained} XP</div><button class="primary" id="celebrateOk">Allez !</button></div>`;
+  c.hidden = false;
+  const colors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];
+  for (let i = 0; i < 40; i++) {
+    const k = document.createElement("i");
+    k.className = "confetti";
+    k.style.left = Math.random() * 100 + "vw";
+    k.style.background = colors[i % colors.length];
+    k.style.animationDuration = 1.6 + Math.random() * 1.6 + "s";
+    k.style.animationDelay = Math.random() * 0.4 + "s";
+    document.body.appendChild(k);
+    setTimeout(() => k.remove(), 3800);
+  }
+  $("#celebrateOk").onclick = () => (c.hidden = true);
+}
+
+async function renderGame() {
+  app.innerHTML = `<p class="loading">…</p>`;
+  let d; try { d = await loadPoint(); } catch (e) { app.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  if (view !== "game") return;
+  const g = d.game;
+  const earned = g.badges.filter((b) => b.earned).length;
+  const LEVELS = [["Licence en poche", 0], ["Sprinteur", 150], ["Olympique", 400], ["Half", 800], ["Ironman", 1500], ["Finisher", 2500], ["Ultra", 4000], ["Légende", 6000]];
+  app.innerHTML = `
+  <h1>Défis</h1>
+  ${levelStrip(g)}
+  <div class="kpis">
+    <div class="kpi"><span>Ressentis d'affilée</span><b>🔥 ${g.streaks.checkin}</b><small>jours</small></div>
+    <div class="kpi"><span>Journées parfaites</span><b>⭐ ${g.streaks.perfect}</b><small>3 quêtes sur 3</small></div>
+    <div class="kpi"><span>Semaines régulières</span><b>🧱 ${g.streaks.regularWeeks}</b><small>3 séances ou plus</small></div>
+    <div class="kpi"><span>Badges</span><b>🏅 ${earned}</b><small>sur ${g.badges.length}</small></div>
+  </div>
+  <div class="card"><h2>Défi de la semaine</h2>
+    <p class="sub">${nf(g.weekly.target, 1)} h d'entraînement d'ici dimanche (80 % de ta dispo déclarée).</p>
+    <div class="xpbar" style="height:12px"><i style="width:${Math.min(100, Math.round((g.weekly.hours / g.weekly.target) * 100))}%"></i></div>
+    <p class="muted">${nf(g.weekly.hours, 1)} h faites${g.weekly.done ? " · défi réussi, +100 XP" : ` · ${g.weekly.daysLeft} jours restants`}</p></div>
+  <div class="card"><h2>Le vestiaire</h2><div id="board"><p class="muted">…</p></div></div>
+  <div class="card"><h2>Badges</h2><div class="badges">${g.badges.map((b) => `<div class="bdg ${b.earned ? "" : "off"}" title="${esc(b.desc)}"><span class="e">${b.icon}</span><b>${esc(b.name)}</b><small>${b.earned ? new Date(b.earned + "T12:00:00").toLocaleDateString("fr-FR") : esc(b.desc)}</small></div>`).join("")}</div></div>
+  <div class="card"><h2>Les niveaux</h2><ul class="ladder">${LEVELS.map(([n, x], i) => `<li class="${i + 1 === g.level.index ? "cur" : i + 1 < g.level.index ? "ok" : ""}"><span>${i + 1}. ${n}</span><span>${nf(x)} XP</span></li>`).join("")}</ul>
+    <p class="muted">Ressenti +20 XP, séance du jour +40, quête bonus +15, journée parfaite +15, défi de la semaine +100, chaque badge +50.</p></div>`;
+  try {
+    const v = await api("/vestiaire");
+    if (view !== "game") return;
+    $("#board").innerHTML = !v.enabled
+      ? `<p class="muted">Rejoins le vestiaire depuis ton profil pour te mesurer à tes potes chaque semaine. Seuls ton prénom, tes ressentis remplis (10 pts) et tes séances déclarées (20 pts) sont partagés.</p><button id="joinV">Modifier mon profil</button>`
+      : v.members.length < 2 ? `<p class="muted">Tu es seul pour l'instant. Partage le lien et le code d'invitation à tes potes.</p>${board(v.members)}` : board(v.members);
+    $("#joinV")?.addEventListener("click", () => renderProfile(false));
+  } catch (e) { $("#board").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+function board(members) {
+  const medal = ["🥇", "🥈", "🥉"];
+  return `<ul class="board">${members.map((m, i) => `<li class="${m.me ? "me" : ""}"><span class="rk">${medal[i] || i + 1}</span><span>${esc(m.name)}${m.me ? " (toi)" : ""}</span><span class="muted">🔥 ${m.streak}</span><b>${m.points} pts</b></li>`).join("")}</ul>
+    <p class="muted">Classement de la semaine, remis à zéro chaque lundi.</p>`;
 }
 
 // ---------- Tableaux de bord ----------
@@ -347,6 +582,7 @@ function renderSettings() {
     <p class="muted">Les activités Strava ne sont jamais stockées : elles sont lues à chaque ouverture. On garde seulement ton profil, tes saisies et des jetons de connexion chiffrés.</p></div>
   <div class="card flat"><p class="muted">Installer l'appli : sur iPhone, bouton Partager puis « Sur l'écran d'accueil ». Sur Android, menu ⋮ puis « Installer l'application ».</p></div>`;
   $("#editProfile").onclick = () => renderProfile(false);
+  if (demo) for (const a of app.querySelectorAll("a.btn")) a.onclick = (e) => { e.preventDefault(); toast("En démo, rien à connecter : crée ton espace pour de vrai !"); };
   $("#corosOn")?.addEventListener("click", () => (location.href = `/api/coros/connect?region=${$("#region").value}`));
   $("#stravaOff")?.addEventListener("click", async () => { me = await api("/strava/disconnect", { method: "POST" }); data = null; renderSettings(); });
   $("#corosOff")?.addEventListener("click", async () => { me = await api("/coros/disconnect", { method: "POST" }); data = null; renderSettings(); });
