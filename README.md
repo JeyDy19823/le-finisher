@@ -57,7 +57,7 @@ Le stockage (Netlify Blobs) est activé automatiquement, il n'y a pas de base de
 
 | Variable | Obligatoire | Rôle |
 |---|---|---|
-| SESSION_SECRET | oui | 32 caractères aléatoires minimum. Signe les sessions et chiffre les jetons. Ne jamais le changer après coup (sinon tout le monde doit reconnecter ses applis). Générer avec `openssl rand -hex 32`. |
+| SESSION_SECRET | non | Facultatif : sans elle, l'appli génère sa propre clé au premier lancement et la garde. Si tu la mets, 32 caractères aléatoires minimum. Signe les sessions et chiffre les jetons. Ne jamais le changer après coup (sinon tout le monde doit reconnecter ses applis). Générer avec `openssl rand -hex 32`. |
 | STRAVA_CLIENT_ID | pour Strava | Identifiant de l'app Strava (voir plus bas). |
 | STRAVA_CLIENT_SECRET | pour Strava | Secret de l'app Strava. |
 | INVITE_CODE | conseillé | Code à donner à tes potes. Sans lui, n'importe qui trouvant l'URL peut créer un compte et prendre une des places Strava. |

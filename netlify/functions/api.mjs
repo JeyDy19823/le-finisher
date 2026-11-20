@@ -1,5 +1,5 @@
 // API unique de l'application, servie sur /api/*.
-import { users, db, sessionCookie, clearCookie, userIdFromRequest, newId, hash, newRecoveryCode, pkce, encrypt, decrypt } from "./_lib/store.mjs";
+import { ensureSecret, users, db, sessionCookie, clearCookie, userIdFromRequest, newId, hash, newRecoveryCode, pkce, encrypt, decrypt } from "./_lib/store.mjs";
 import * as strava from "./_lib/strava.mjs";
 import { COROS_REGIONS, registerClient, authorizeUrl as corosAuthUrl, exchangeCode as corosExchange, refreshToken as corosRefresh, CorosMcp, fetchCorosData } from "./_lib/coros.mjs";
 import { dailyPoint, normalizeStrava, GOALS, isoDay, addDays, dedupe } from "./_lib/engine.mjs";
@@ -159,6 +159,7 @@ export default async (req) => {
   const method = req.method;
   const body = method === "POST" ? await req.json().catch(() => ({})) : {};
   try {
+    await ensureSecret();
     // Création de compte (avec code d'invitation si défini).
     if (path === "/signup" && method === "POST") {
       if (process.env.INVITE_CODE && String(body.invite || "").trim() !== process.env.INVITE_CODE) return json({ error: "Code d'invitation incorrect" }, 403);

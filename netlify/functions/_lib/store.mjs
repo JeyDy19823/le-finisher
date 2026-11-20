@@ -2,10 +2,26 @@
 import crypto from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
+// Clé qui signe les sessions et chiffre les jetons. Si la variable SESSION_SECRET n'est pas
+// définie dans Netlify, l'appli en génère une au hasard au premier lancement et la garde
+// dans son stockage : rien à configurer, et la clé ne change plus ensuite.
+let secretCache = null;
+export async function ensureSecret() {
+  if (secretCache) return secretCache;
+  const env = process.env.SESSION_SECRET;
+  if (env && env.length >= 32) return (secretCache = env);
+  let cfg = await store().get("config/secret", { type: "json" });
+  if (!cfg || !cfg.value) {
+    cfg = { value: crypto.randomBytes(32).toString("hex"), createdAt: Date.now() };
+    await store().setJSON("config/secret", cfg);
+    // Relecture : si deux premiers appels arrivent en même temps, tout le monde garde la même clé.
+    cfg = (await store().get("config/secret", { type: "json" })) || cfg;
+  }
+  return (secretCache = cfg.value);
+}
 const SECRET = () => {
-  const s = process.env.SESSION_SECRET;
-  if (!s || s.length < 32) throw new Error("SESSION_SECRET manquant (32 caractères minimum)");
-  return s;
+  if (!secretCache) throw new Error("Clé de session non chargée");
+  return secretCache;
 };
 const key = () => crypto.createHash("sha256").update("enc:" + SECRET()).digest();
 
