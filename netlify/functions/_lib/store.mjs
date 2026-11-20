@@ -81,3 +81,26 @@ export const users = {
   save: (u) => db.set(`users/${u.id}`, { ...u, updatedAt: Date.now() }),
   remove: (id) => db.del(`users/${id}`),
 };
+
+// Réglages du site modifiables depuis l'appli (onglet Administration).
+// Les variables Netlify, si elles existent, passent toujours en premier.
+export async function appConfig() {
+  const c = (await db.get("config/app")) || {};
+  const secret = c.stravaSecret ? decrypt(c.stravaSecret)?.v : null;
+  return {
+    stravaId: process.env.STRAVA_CLIENT_ID || c.stravaId || null,
+    stravaSecret: process.env.STRAVA_CLIENT_SECRET || secret || null,
+    invite: process.env.INVITE_CODE || c.invite || null,
+    fromEnv: { strava: !!process.env.STRAVA_CLIENT_ID, invite: !!process.env.INVITE_CODE },
+    adminId: c.adminId || null,
+  };
+}
+export async function saveAppConfig(patch) {
+  const c = (await db.get("config/app")) || {};
+  const next = { ...c };
+  if (patch.stravaId !== undefined) next.stravaId = String(patch.stravaId || "").trim() || null;
+  if (patch.stravaSecret) next.stravaSecret = encrypt({ v: String(patch.stravaSecret).trim() });
+  if (patch.invite !== undefined) next.invite = String(patch.invite || "").trim() || null;
+  if (patch.adminId) next.adminId = patch.adminId;
+  await db.set("config/app", next);
+}

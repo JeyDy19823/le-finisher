@@ -228,3 +228,13 @@ body.landing.scrolled .sticky-cta { transform: none; }
 .howto li { margin-bottom: 10px; color: var(--text-2); }
 .howto b { color: var(--text); }
 code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 13px; }
+
+.stages { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 4px 0 6px; }
+.stages i { display: block; }
+.installbar { position: fixed; left: 10px; right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 8; display: flex; align-items: center; gap: 10px; background: #2c2c2a; border: 1px solid var(--line); border-radius: 14px; padding: 10px 10px 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+body.landing .installbar { bottom: calc(76px + env(safe-area-inset-bottom)); }
+.installbar > div { flex: 1; min-width: 0; }
+.installbar small { display: block; color: var(--text-2); font-size: 12px; }
+.ib-ic { font-size: 24px; }
+.ib-x { border: 0; background: none; color: var(--muted); padding: 6px; }
+.share-ic { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }

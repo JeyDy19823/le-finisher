@@ -8,7 +8,7 @@ assert.deepEqual(acts.map(a=>a.category), ["hybrid","bike","bike","run","hybrid"
 assert.equal(acts[3].distanceKm, 13.51); assert.equal(acts[3].avgHr, 163); assert.equal(acts[3].durationMin, 82);
 const d = dedupe(acts); assert.equal(d.length, 4, "Zwift doublon supprimé");
 assert.ok(d.find(a=>a.category==="bike").avgHr === 134);
-const h = parseHrv(S.hrv, "2026-11-19"); assert.equal(h.latest.value, 33); assert.equal(h.latest.low, 37); assert.equal(h.latest.evaluation, "Below normal");
+const h = parseHrv(S.hrv, "2026-11-19"); assert.equal(h.latest.value, 33); assert.equal(h.latest.low, 37); assert.equal(h.latest.evaluation, "sous ta normale");
 assert.equal(parseSleep(S.sleep).length, 1); assert.equal(parseSleep(S.sleep)[0].score, 59);
 assert.equal(parseRecovery(S.recovery).percent, 100);
 assert.equal(parseRhr(S.rhr).length, 2);

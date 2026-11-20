@@ -333,6 +333,7 @@ async function renderToday() {
       </div></div>
     <ul class="parts">${r.parts.map((x) => `<li><span>${esc(x.label)}<br><span class="d">${esc(x.detail)}</span></span><span class="bar" style="width:90px"><i style="width:${x.score}%;background:${x.score >= 75 ? "var(--good)" : x.score >= 55 ? "var(--warning)" : "var(--critical)"}"></i></span><span class="d" style="text-align:right">${x.score}/100</span></li>`).join("")}</ul>
   </div>
+  ${nightCard(d)}
   ${p.alerts.map((a) => `<div class="alert">${esc(a)}</div>`).join("")}
   <h2>Séances proposées</h2>
   ${p.alreadyDone.length ? `<p class="muted">Déjà fait aujourd'hui : ${esc(p.alreadyDone.join(", "))}</p>` : ""}
@@ -369,6 +370,23 @@ async function renderToday() {
     catch (e) { $("#coachText").textContent = e.message; }
     b.disabled = false;
   });
+}
+
+function nightCard(d) {
+  const h = d.health || {};
+  const n = h.lastNight;
+  if (!d.sources.coros && !me.phone?.connected) return "";
+  const today = d.point.today;
+  const isToday = n && n.date === today;
+  const head = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">😴 Ta nuit</h2><span class="muted">${h.sleepSource ? "via " + esc(h.sleepSource) : ""}</span></div>`;
+  if (!n) return `<div class="card">${head}<p class="sub" style="margin-top:8px">Aucune nuit reçue pour l'instant. Porte ta montre la nuit et ouvre son appli le matin pour qu'elle synchronise.</p></div>`;
+  const stages = n.deep != null ? `<div class="stages"><i style="flex:${n.deep};background:#104281" title="Profond"></i><i style="flex:${n.light || 0};background:#2a78d6" title="Léger"></i><i style="flex:${n.rem || 0};background:#86b6ef" title="Paradoxal"></i></div>
+    <div class="row muted small"><span>■ Profond ${n.deep} %</span><span>■ Léger ${n.light ?? "–"} %</span><span>■ Paradoxal ${n.rem ?? "–"} %</span></div>` : "";
+  return `<div class="card">${head}
+    ${!isToday ? `<div class="alert" style="margin:10px 0">Ta nuit dernière n'est pas encore remontée. Ouvre l'appli ${h.sleepSource === "COROS" || d.sources.coros ? "COROS" : "de ta montre"} pour synchroniser, puis actualise ↻. En attendant, voici la nuit du ${longDate(n.date)}.</div>` : ""}
+    <div class="kpis" style="margin:10px 0 8px"><div class="kpi"><span>Durée</span><b>${esc(n.duration || "–")}</b></div><div class="kpi"><span>Score</span><b>${n.score ?? "–"}</b><small>${n.estimated ? "estimé" : "/100"}</small></div>
+    ${h.hrv ? `<div class="kpi"><span>VFC</span><b>${h.hrv.value}</b><small>ms ${esc(h.hrv.evaluation || "")}</small></div>` : ""}${h.rhr ? `<div class="kpi"><span>FC repos</span><b>${h.rhr.today}</b><small>bpm</small></div>` : ""}</div>
+    ${stages}${n.window ? `<p class="muted small">${esc(n.window)}</p>` : ""}</div>`;
 }
 
 function scale(k, label, val, hint) {
@@ -576,6 +594,37 @@ async function renderGoal() {
   $("#edit").onclick = () => renderProfile(false);
 }
 
+// ---------- Administration ----------
+async function renderAdmin() {
+  view = "settings";
+  let a;
+  try { a = await api("/admin"); } catch (e) { return toast(e.message); }
+  if (!a.isAdmin) return toast("Réservé à l'administrateur");
+  app.innerHTML = `<h1>Administration</h1>
+  <div class="card"><h2>Activer Strava</h2>
+    ${a.fromEnv.strava ? `<p class="ok">Strava est réglé dans Netlify.</p>` : `
+    <ol class="howto">
+      <li>Sur ordinateur, va sur <b>strava.com/settings/api</b> (connecté à ton compte Strava).</li>
+      <li>Remplis : Application Name <b>Le Finisher</b>, Category <b>Training</b>, Website <b>https://${esc(a.callbackDomain)}</b>.</li>
+      <li>Authorization Callback Domain : <b>${esc(a.callbackDomain)}</b> (sans https, sans /).</li>
+      <li>Ajoute une icône (n'importe quelle image), accepte les conditions, valide.</li>
+      <li>Copie ici le <b>Client ID</b> et le <b>Client Secret</b> affichés par Strava.</li>
+    </ol>
+    <label for="sid">Client ID</label><input id="sid" inputmode="numeric" value="${esc(a.stravaId || "")}">
+    <label for="ssec">Client Secret</label><input id="ssec" type="password" placeholder="${a.hasStravaSecret ? "Déjà enregistré (laisser vide pour garder)" : ""}">
+    <p class="muted small">Au départ, Strava n'autorise qu'un seul athlète (toi). Pour tes potes, passe à 10 dans le tableau de bord API Strava (abonnement Strava requis).</p>`}</div>
+  <div class="card"><h2>Code d'invitation</h2>
+    ${a.fromEnv.invite ? `<p class="ok">Réglé dans Netlify.</p>` : `<p class="muted">Demandé à la création d'un espace. Laisse vide pour un accès libre.</p><input id="inv" value="${esc(a.invite || "")}" placeholder="Ex. FINISHER2027">`}</div>
+  <div class="split"><button id="backSettings">Retour</button><button class="primary" id="saveAdmin">Enregistrer</button></div>`;
+  $("#backSettings").onclick = () => go("settings");
+  $("#saveAdmin").onclick = async () => {
+    try {
+      await api("/admin", { method: "POST", body: { stravaId: $("#sid")?.value, stravaSecret: $("#ssec")?.value, invite: $("#inv") ? $("#inv").value : undefined } });
+      me = await api("/me"); toast("Réglages enregistrés"); go("settings");
+    } catch (e) { toast(e.message); }
+  };
+}
+
 // ---------- Apple Santé / Android ----------
 async function renderPhone(tab) {
   view = "settings";
@@ -630,7 +679,7 @@ async function renderSettings() {
   <h1>Réglages</h1>
   <div class="card"><h2>Mes applis</h2>
     <div class="conn"><div><b>Strava</b><br><span class="muted">${me.strava.connected ? `<span class="ok">Connecté</span>${me.strava.firstname ? " · " + esc(me.strava.firstname) : ""}` : "Activités, durées, fréquence cardiaque"}</span></div>
-      ${me.strava.connected ? `<button id="stravaOff">Déconnecter</button>` : me.stravaAvailable ? `<a class="btn strava" href="/api/strava/connect">Se connecter avec Strava</a>` : `<span class="muted">Non configuré</span>`}</div>
+      ${me.strava.connected ? `<button id="stravaOff">Déconnecter</button>` : me.stravaAvailable ? `<a class="btn strava" href="/api/strava/connect">Se connecter avec Strava</a>` : me.isAdmin ? `<button id="toAdmin">Activer Strava</button>` : `<span class="muted">Pas encore activé</span>`}</div>
     <div class="conn"><div><b>COROS</b><br><span class="muted">${me.coros.connected ? `<span class="ok">Connecté</span> · région ${esc(me.coros.region.toUpperCase())}` : "Activités, VFC, sommeil, récupération"}</span></div>
       ${me.coros.connected ? `<button id="corosOff">Déconnecter</button>` : `<div class="row"><select id="region" style="width:auto"><option value="eu">Europe</option><option value="us">États-Unis</option><option value="cn">Chine</option></select><button class="primary" id="corosOn">Connecter</button></div>`}</div>
     <div class="conn"><div><b>Apple Santé / Android</b><br><span class="muted">${me.phone.connected ? `<span class="ok">Reçu</span> · dernière synchro ${new Date(me.phone.lastSync).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}` : "Sommeil, VFC, FC repos, poids, séances du téléphone"}</span></div>
@@ -643,9 +692,16 @@ async function renderSettings() {
   <div class="card"><h2>Mes données</h2>
     <div class="row"><a class="btn" href="/api/export">Exporter (JSON)</a><button id="logout">Me déconnecter</button><button class="danger" id="del">Supprimer mon compte</button></div>
     <p class="muted">Les activités Strava ne sont jamais stockées : elles sont lues à chaque ouverture. On garde seulement ton profil, tes saisies et des jetons de connexion chiffrés.</p></div>
-  <div class="card flat"><p class="muted">Installer l'appli : sur iPhone, bouton Partager puis « Sur l'écran d'accueil ». Sur Android, menu ⋮ puis « Installer l'application ».</p></div>`;
+  <div class="card"><h2>📲 Installer l'appli</h2><p class="muted">${isStandalone() ? "C'est fait, tu utilises déjà l'appli installée." : "Ajoute Le Finisher sur ton écran d'accueil, comme une vraie appli."}</p>${isStandalone() ? "" : `<button id="installNow" class="primary">Installer</button>`}</div>
+  ${me.isAdmin || me.adminClaimable ? `<div class="card"><h2>🛠️ Administration</h2><p class="muted">${me.isAdmin ? "Tu gères les réglages du site : Strava, code d'invitation." : "Personne n'administre encore le site. Si c'est ton appli, prends la main pour régler Strava et le code d'invitation."}</p><button id="adminBtn">${me.isAdmin ? "Ouvrir" : "Devenir administrateur"}</button></div>` : ""}`;
   $("#editProfile").onclick = () => renderProfile(false);
   $("#phoneCfg").onclick = () => renderPhone();
+  $("#installNow")?.addEventListener("click", async () => { if (installEvt) { installEvt.prompt(); installEvt = null; } else installSheet(); });
+  $("#toAdmin")?.addEventListener("click", () => renderAdmin());
+  $("#adminBtn")?.addEventListener("click", async () => {
+    if (!me.isAdmin) { try { await api("/admin/claim", { method: "POST" }); me = await api("/me"); } catch (e) { return toast(e.message); } }
+    renderAdmin();
+  });
   if (demo) for (const a of app.querySelectorAll("a.btn")) a.onclick = (e) => { e.preventDefault(); toast("En démo, rien à connecter : crée ton espace pour de vrai !"); };
   $("#corosOn")?.addEventListener("click", () => (location.href = `/api/coros/connect?region=${$("#region").value}`));
   $("#stravaOff")?.addEventListener("click", async () => { me = await api("/strava/disconnect", { method: "POST" }); data = null; renderSettings(); });
@@ -659,4 +715,39 @@ async function renderSettings() {
 }
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+// ---------- Installation sur le téléphone ----------
+let installEvt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; showInstall(); });
+window.addEventListener("appinstalled", () => { installEvt = null; $("#installBar")?.remove(); toast("Appli installée 🎉"); });
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const inAppBrowser = () => /Instagram|FBAN|FBAV|Messenger|WhatsApp|Line\/|Snapchat|TikTok/i.test(navigator.userAgent);
+function showInstall() {
+  if (isStandalone() || $("#installBar")) return;
+  try { if (localStorage.getItem("installLater") > Date.now()) return; } catch { /* stockage indisponible */ }
+  if (!installEvt && !isIOS() && !inAppBrowser() && !/android/i.test(navigator.userAgent)) return;
+  const bar = document.createElement("div");
+  bar.id = "installBar";
+  bar.className = "installbar";
+  bar.innerHTML = `<span class="ib-ic">📲</span><div><b>Installe Le Finisher</b><small>${inAppBrowser() ? "Ouvre d'abord la page dans Safari ou Chrome" : "Une icône sur ton écran d'accueil, en plein écran"}</small></div><button class="primary" id="ibGo">Installer</button><button class="ib-x" id="ibX" aria-label="Plus tard">✕</button>`;
+  document.body.appendChild(bar);
+  $("#ibX").onclick = () => { bar.remove(); try { localStorage.setItem("installLater", Date.now() + 3 * 86400000); } catch { /* */ } };
+  $("#ibGo").onclick = async () => {
+    if (installEvt) { installEvt.prompt(); const r = await installEvt.userChoice; if (r.outcome === "accepted") bar.remove(); installEvt = null; return; }
+    installSheet();
+  };
+}
+function installSheet() {
+  const c = $("#celebrate");
+  const ig = inAppBrowser();
+  c.innerHTML = `<div class="box" style="text-align:left"><h2>Installer l'appli</h2>
+    ${ig ? `<p>Tu es dans le navigateur d'Instagram (ou d'une autre appli), qui ne permet pas l'installation.</p><ol class="howto"><li>Touche les <b>⋯</b> en haut à droite.</li><li>Choisis <b>Ouvrir dans le navigateur</b> (Safari sur iPhone, Chrome sur Android).</li><li>Reviens sur ce bouton « Installer ».</li></ol>`
+    : isIOS() ? `<ol class="howto"><li>Ouvre la page dans <b>Safari</b>.</li><li>Touche le bouton <b>Partager</b> <span class="share-ic">⬆︎</span> en bas de l'écran.</li><li>Fais défiler et choisis <b>Sur l'écran d'accueil</b>.</li><li>Touche <b>Ajouter</b> : l'icône Le Finisher apparaît avec tes autres applis.</li></ol>`
+    : `<ol class="howto"><li>Ouvre la page dans <b>Chrome</b>.</li><li>Touche le menu <b>⋮</b> en haut à droite.</li><li>Choisis <b>Installer l'application</b> (ou « Ajouter à l'écran d'accueil »).</li></ol>`}
+    <button class="primary" id="sheetOk" style="width:100%">Compris</button></div>`;
+  c.hidden = false;
+  $("#sheetOk").onclick = () => (c.hidden = true);
+}
+setTimeout(showInstall, 2500);
 boot();

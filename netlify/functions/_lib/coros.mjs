@@ -162,11 +162,18 @@ export function parseSportRecords(text) {
   return out;
 }
 
+const FR = {
+  "below normal": "sous ta normale", normal: "dans ta normale", "above normal": "au-dessus de ta normale", low: "basse", high: "haute",
+  performance: "En forme", maintaining: "Maintien", optimized: "Optimisé", overreaching: "Surcharge", overtraining: "Surentraînement",
+  detraining: "Désentraînement", recovery: "Récupération", fresh: "Frais", productive: "Productif",
+};
+export const fr = (t) => FR[String(t || "").trim().toLowerCase()] || String(t || "").trim();
+
 export function parseHrv(text, today) {
   const re = /(\d{4}-\d{2}-\d{2}):\s*\n\s*HRV Avg:\s*(\d+)\s*ms(?:\s*—\s*([^\n]+))?\s*\n\s*Normal Range:\s*(\d+)\s*-\s*(\d+)\s*ms(?:\s*\n\s*Baseline:\s*(\d+))?/g;
   const days = [];
   let m;
-  while ((m = re.exec(String(text)))) days.push({ date: m[1], value: +m[2], evaluation: (m[3] || "").trim(), low: +m[4], high: +m[5], baseline: m[6] ? +m[6] : null });
+  while ((m = re.exec(String(text)))) days.push({ date: m[1], value: +m[2], evaluation: fr(m[3]), low: +m[4], high: +m[5], baseline: m[6] ? +m[6] : null });
   const latest = days.filter((d) => d.date <= today).pop() || null;
   return { latest, days };
 }
@@ -182,6 +189,10 @@ export function parseSleep(text) {
       score,
       duration: (b.match(/Main Sleep \(asleep\):\s*([^\n]+)/) || [])[1] || "",
       deep: Number((b.match(/Deep Sleep Ratio:\s*(\d+)/) || [])[1]) || null,
+      light: Number((b.match(/Light Sleep Ratio:\s*(\d+)/) || [])[1]) || null,
+      rem: Number((b.match(/REM Ratio:\s*(\d+)/) || [])[1]) || null,
+      awakeMin: Number((b.match(/Awake Time:\s*(\d+)/) || [])[1]) || 0,
+      window: ((b.match(/Main Sleep Window:\s*([^\n]+)/) || [])[1] || "").trim(),
     });
   }
   return out;
@@ -189,7 +200,7 @@ export function parseSleep(text) {
 
 export function parseRecovery(text) {
   const p = (String(text).match(/Recovery:\s*(\d+)\s*%/) || [])[1];
-  return p == null ? null : { percent: Number(p), level: (String(text).match(/Level:\s*([^\n]+)/) || [])[1] || "" };
+  return p == null ? null : { percent: Number(p), level: fr((String(text).match(/Level:\s*([^\n]+)/) || [])[1]) };
 }
 
 export function parseRhr(text) {
@@ -204,7 +215,7 @@ export function parseLoad(text) {
     if (!date) continue;
     out.push({
       date,
-      comment: ((b.match(/Comment:\s*([^\n]+)/) || [])[1] || "").trim(),
+      comment: fr((b.match(/Comment:\s*([^\n]+)/) || [])[1]),
       shortTerm: Number((b.match(/Short-Term Load:\s*([\d.]+)/) || [])[1]) || null,
       longTerm: Number((b.match(/Long-Term Load:\s*([\d.]+)/) || [])[1]) || null,
       ratio: Number((b.match(/Load Ratio:\s*([\d.]+)/) || [])[1]) || null,
@@ -246,6 +257,8 @@ export async function fetchCorosData(mcp, today, historyDays = 120) {
       hrv: hrvP.latest,
       hrvHistory: hrvP.days,
       sleep: lastSleep && lastSleep.date >= addIso(today, -1) ? lastSleep : null,
+      lastNight: lastSleep,
+      sleepPending: !sleepP.some((x) => x.date === today),
       sleepHistory: sleepP,
       recovery: parseRecovery(recovery),
       rhr: rhrToday ? { today: rhrToday.bpm, date: rhrToday.date, avg: rhrAvg } : null,

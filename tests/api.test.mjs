@@ -72,7 +72,7 @@ console.log("Point :", P.readiness.score, P.readiness.label, "| CTL", P.load.ctl
 // Coach IA : aucune donnée Strava dans le prompt
 const co = await call("/coach", { method: "POST", body: {} }); assert.equal(co.j.text, "Point du coach.");
 assert.ok(!/strava|Footing/i.test(aiPrompt), "des données Strava ont fuité vers l'IA");
-assert.ok(aiPrompt.includes("Below normal"));
+assert.ok(aiPrompt.includes("sous ta normale"));
 // Gamification
 assert.ok(pt.j.game && pt.j.game.quests.length === 3, "quêtes absentes");
 assert.ok(pt.j.game.level.xp > 0);
@@ -81,6 +81,11 @@ await call("/quest", { method: "POST", body: { action: "declare" } });
 await call("/profile", { method: "POST", body: { profile: { ...prof.j.profile, vestiaire: true } } });
 const v1 = await call("/vestiaire"); assert.equal(v1.j.enabled, true); assert.equal(v1.j.members.length, 1); assert.equal(v1.j.members[0].points, 30);
 assert.ok(!JSON.stringify(v1.j).match(/km|bpm|Footing|load|ctl/i), "données d'activité exposées au vestiaire");
+// Administration : le premier qui la réclame devient admin, une seule fois
+const cl = await call("/admin/claim", { method: "POST" }); assert.equal(cl.status, 200);
+assert.equal((await call("/admin/claim", { method: "POST" })).status, 409);
+const ad = await call("/admin", { method: "POST", body: { invite: "AUTRE" } }); assert.equal(ad.j.isAdmin, true);
+assert.equal(ad.j.invite, "TRI2027", "la variable Netlify doit rester prioritaire");
 // Téléphone : adresse personnelle + réception
 const ph = await call("/phone"); assert.match(ph.j.url, /\/api\/ingest\/[\w-]{20,}$/);
 const ing = await handler(new Request(ph.j.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ date: today, hrv: "61 ms", restingHr: 50, weight: 87.9, sleepMinutes: 470 }) }));

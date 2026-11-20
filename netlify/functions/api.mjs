@@ -1,5 +1,5 @@
 // API unique de l'application, servie sur /api/*.
-import { ensureSecret, users, db, sessionCookie, clearCookie, userIdFromRequest, newId, hash, newRecoveryCode, pkce, encrypt, decrypt } from "./_lib/store.mjs";
+import { ensureSecret, appConfig, saveAppConfig, users, db, sessionCookie, clearCookie, userIdFromRequest, newId, hash, newRecoveryCode, pkce, encrypt, decrypt } from "./_lib/store.mjs";
 import * as strava from "./_lib/strava.mjs";
 import { COROS_REGIONS, registerClient, authorizeUrl as corosAuthUrl, exchangeCode as corosExchange, refreshToken as corosRefresh, CorosMcp, fetchCorosData } from "./_lib/coros.mjs";
 import { dailyPoint, normalizeStrava, GOALS, isoDay, addDays, dedupe } from "./_lib/engine.mjs";
@@ -27,18 +27,22 @@ function publicUser(u) {
     coros: u.coros ? { connected: true, region: u.coros.region } : { connected: false },
     phone: u.phone?.lastSync ? { connected: true, lastSync: u.phone.lastSync, source: u.phone.source || "" } : { connected: false },
     checkins: u.checkins || {},
-    stravaAvailable: !!(process.env.STRAVA_CLIENT_ID && process.env.STRAVA_CLIENT_SECRET),
+    stravaAvailable: !!(CFG.stravaId && CFG.stravaSecret),
     aiAvailable: !!process.env.ANTHROPIC_API_KEY,
-    inviteRequired: !!process.env.INVITE_CODE,
+    inviteRequired: !!CFG.invite,
+    isAdmin: CFG.adminId === u.id,
+    adminClaimable: !CFG.adminId,
   };
 }
+
+let CFG = {};
 
 // ---------- Jetons ----------
 async function stravaToken(u) {
   if (!u.strava) return null;
   let t = decrypt(u.strava.tokens);
   if (t.expiresAt - 120000 < Date.now()) {
-    t = { ...t, ...(await strava.refresh({ clientId: process.env.STRAVA_CLIENT_ID, clientSecret: process.env.STRAVA_CLIENT_SECRET, refreshToken: t.refresh })) };
+    t = { ...t, ...(await strava.refresh({ clientId: CFG.stravaId, clientSecret: CFG.stravaSecret, refreshToken: t.refresh })) };
     u.strava.tokens = encrypt(t);
     u._dirty = true;
   }
@@ -91,6 +95,11 @@ async function collect(u, today) {
   const health = { ...(coros.health || {}) };
   for (const k of ["hrv", "sleep", "rhr"]) if (!health[k] && ph[k]) health[k] = ph[k];
   for (const k of ["hrvHistory", "sleepHistory", "rhrHistory"]) if (!(health[k] && health[k].length) && ph[k] && ph[k].length) health[k] = ph[k];
+  health.sleepSource = coros.health?.lastNight ? "COROS" : ph.sleepHistory?.length ? "téléphone" : null;
+  if (!health.lastNight && ph.sleepHistory?.length) {
+    health.lastNight = ph.sleepHistory[ph.sleepHistory.length - 1];
+    health.sleepPending = health.lastNight.date !== today;
+  }
   const phoneActs = Object.values(u.phone?.workouts || {});
   return { activities: [...coros.activities, ...stravaActs, ...phoneActs], health, errors };
 }
@@ -130,7 +139,7 @@ N'invente aucune donnée absente. Si une donnée manque, n'en parle pas.`;
 async function findOrCreate(mapKey, invite) {
   const link = await db.get(mapKey);
   if (link) { const u = await users.get(link.userId); if (u) return u; }
-  if (process.env.INVITE_CODE && String(invite || "").trim() !== process.env.INVITE_CODE) return null;
+  if (CFG.invite && String(invite || "").trim() !== CFG.invite) return null;
   const u = { id: newId(), createdAt: Date.now(), checkins: {} };
   await users.save(u);
   await db.set(mapKey, { userId: u.id });
@@ -160,9 +169,10 @@ export default async (req) => {
   const body = method === "POST" ? await req.json().catch(() => ({})) : {};
   try {
     await ensureSecret();
+    CFG = await appConfig();
     // Création de compte (avec code d'invitation si défini).
     if (path === "/signup" && method === "POST") {
-      if (process.env.INVITE_CODE && String(body.invite || "").trim() !== process.env.INVITE_CODE) return json({ error: "Code d'invitation incorrect" }, 403);
+      if (CFG.invite && String(body.invite || "").trim() !== CFG.invite) return json({ error: "Code d'invitation incorrect" }, 403);
       const id = newId();
       const code = newRecoveryCode();
       await users.save({ id, createdAt: Date.now(), checkins: {}, recoveryHash: hash(code) });
@@ -194,10 +204,10 @@ export default async (req) => {
 
     // Connexion à son espace avec son compte Strava ou COROS (crée l'espace si besoin).
     if (path === "/strava/login") {
-      if (!process.env.STRAVA_CLIENT_ID) return redirect("/?erreur=strava-config");
+      if (!CFG.stravaId) return redirect("/?erreur=strava-config");
       const state = newId();
       await db.set(`oauth/${state}`, { mode: "login", invite: url.searchParams.get("invite") || "", at: Date.now() });
-      return redirect(strava.authorizeUrl({ clientId: process.env.STRAVA_CLIENT_ID, redirectUri: `${origin(req)}/api/strava/callback`, state }));
+      return redirect(strava.authorizeUrl({ clientId: CFG.stravaId, redirectUri: `${origin(req)}/api/strava/callback`, state }));
     }
     if (path === "/coros/login") {
       const region = COROS_REGIONS[url.searchParams.get("region")] ? url.searchParams.get("region") : "eu";
@@ -209,7 +219,7 @@ export default async (req) => {
       const st = await db.get(`oauth/${url.searchParams.get("state")}`);
       if (!st || url.searchParams.get("error")) return redirect("/?erreur=strava");
       await db.del(`oauth/${url.searchParams.get("state")}`);
-      const t = await strava.exchangeCode({ clientId: process.env.STRAVA_CLIENT_ID, clientSecret: process.env.STRAVA_CLIENT_SECRET, code: url.searchParams.get("code") });
+      const t = await strava.exchangeCode({ clientId: CFG.stravaId, clientSecret: CFG.stravaSecret, code: url.searchParams.get("code") });
       const scope = url.searchParams.get("scope") || "";
       if (!scope.includes("activity:read")) return redirect("/?erreur=strava-scope");
       let u;
@@ -245,7 +255,7 @@ export default async (req) => {
     // Tout le reste exige une session.
     const uid = userIdFromRequest(req);
     const u = uid && (await users.get(uid));
-    if (!u) return json({ error: "non_connecte", inviteRequired: !!process.env.INVITE_CODE, stravaAvailable: !!process.env.STRAVA_CLIENT_ID }, 401);
+    if (!u) return json({ error: "non_connecte", inviteRequired: !!CFG.invite, stravaAvailable: !!CFG.stravaId }, 401);
 
     if (path === "/me") return json(publicUser(u));
 
@@ -290,6 +300,27 @@ export default async (req) => {
       return json({ ok: true });
     }
 
+    if (path === "/admin") {
+      const host = new URL(origin(req)).host;
+      if (method === "POST") {
+        if (CFG.adminId !== u.id) return json({ error: "Réservé à l'administrateur" }, 403);
+        await saveAppConfig({ stravaId: body.stravaId, stravaSecret: body.stravaSecret, invite: body.invite });
+        CFG = await appConfig();
+      }
+      return json({
+        isAdmin: CFG.adminId === u.id, claimable: !CFG.adminId,
+        stravaId: CFG.adminId === u.id ? CFG.stravaId : null, hasStravaSecret: !!CFG.stravaSecret,
+        invite: CFG.adminId === u.id ? CFG.invite : null, fromEnv: CFG.fromEnv, callbackDomain: host,
+        users: CFG.adminId === u.id ? ((await db.get("vestiaire/index")) || { ids: [] }).ids.length : null,
+      });
+    }
+    if (path === "/admin/claim" && method === "POST") {
+      if (CFG.adminId) return json({ error: "Il y a déjà un administrateur" }, 409);
+      await saveAppConfig({ adminId: u.id });
+      CFG = await appConfig();
+      return json({ ok: true });
+    }
+
     if (path === "/vestiaire") {
       if (!u.profile?.vestiaire) return json({ enabled: false, members: [] });
       const today = todayIn(u.profile.tz);
@@ -331,7 +362,7 @@ export default async (req) => {
       return json({
         point,
         game: g.view,
-        health: { hrv: health.hrv, hrvHistory: health.hrvHistory || [], sleep: health.sleep, sleepHistory: health.sleepHistory || [], recovery: health.recovery, rhr: health.rhr, rhrHistory: health.rhrHistory || [], corosLoad: health.corosLoad || [] },
+        health: { lastNight: health.lastNight || null, sleepPending: !!health.sleepPending, sleepSource: health.sleepSource || null, hrv: health.hrv, hrvHistory: health.hrvHistory || [], sleep: health.sleep, sleepHistory: health.sleepHistory || [], recovery: health.recovery, rhr: health.rhr, rhrHistory: health.rhrHistory || [], corosLoad: health.corosLoad || [] },
         errors,
         sources: { strava: !!u.strava, coros: !!u.coros },
       });
@@ -359,10 +390,10 @@ export default async (req) => {
     }
 
     if (path === "/strava/connect") {
-      if (!process.env.STRAVA_CLIENT_ID) return redirect("/?erreur=strava-config");
+      if (!CFG.stravaId) return redirect("/?erreur=strava-config");
       const state = newId();
       await db.set(`oauth/${state}`, { userId: u.id, at: Date.now() });
-      return redirect(strava.authorizeUrl({ clientId: process.env.STRAVA_CLIENT_ID, redirectUri: `${origin(req)}/api/strava/callback`, state }));
+      return redirect(strava.authorizeUrl({ clientId: CFG.stravaId, redirectUri: `${origin(req)}/api/strava/callback`, state }));
     }
     if (path === "/coros/connect") {
       const region = COROS_REGIONS[url.searchParams.get("region")] ? url.searchParams.get("region") : "eu";
